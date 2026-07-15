@@ -34,7 +34,11 @@ program can only violate schedule-independence through effects the semantics rep
   therefore (correctly) flagged as a conflict by `HardenedConfluence.schedule_independent_or_race`,
   NOT certified as schedule-independent. Soundness of the abstract source-level predicates
   (`disjoint_write_class`) requires `read_foot`/`write_foot` to include ALL accesses, including
-  reads/writes of private blocks; otherwise the counter example would spuriously satisfy them.
+  reads/writes of private blocks. This soundness condition is now DISCHARGED in
+  `SourceToTrace.v`: the footprints are taken directly from the traces
+  (`trace_write_foot`/`trace_read_foot`), `class_eq_traces_indep` proves the class predicate at
+  those footprints is equivalent to trace independence (so nothing can be forgotten), and
+  `private_counter_not_in_class` proves the counter program is outside the class.
 
 - **Thread identity is NOT a value available to the loop body.** There is no
   `omp_get_thread_num` primitive in the modeled semantics. Thread number enters ONLY inside

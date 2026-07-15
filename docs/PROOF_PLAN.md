@@ -96,10 +96,22 @@ Build all with `sh sched_indep/build.sh`. Status of each file:
                         location is characterised canonically (`raw_run_content_char`). Depends only
                         on `classic`; no `Admitted`, no framework axioms.
 
-STATUS: C0 (pure, T0) and C1 (disjoint-write, T1) are machine-checked, and the C1 result is
-additionally available in a RACE-AGNOSTIC form (`HardenedConfluence.v`) whose independence
-hypothesis is derived from the traces and comes with a race witness on the negative side. C3's
-algebraic core (`Reduction.v`) and thread-count independence (`ChunkIndep.v`, L5) compose with C1.
+- `SourceToTrace.v`   — **SOURCE-PREDICATE-TO-TRACE SOUNDNESS BRIDGE.** Defines the per-iteration
+                        footprints directly from the traces (`trace_write_foot`/`trace_read_foot`),
+                        so no access -- private reads/writes included -- can be omitted.
+                        `class_eq_traces_indep`: `disjoint_write_class` at these footprints is
+                        EQUIVALENT to `traces_indep` (axiom-free). `class_schedule_independent`:
+                        the source-level class predicate implies schedule-independence.
+                        `private_counter_not_in_class` / `read_after_write_not_in_class`: a
+                        per-thread counter (two distinct iterations sharing a private block) is
+                        provably OUTSIDE the class. Fixes the earlier unsoundness where an
+                        under-approximated `read_foot` could omit a private read.
+
+STATUS: C0 (pure, T0) and C1 (disjoint-write, T1) are machine-checked; the C1 result is also
+available in a RACE-AGNOSTIC form (`HardenedConfluence.v`); and the source-level class predicate is
+now SOUNDLY CONNECTED to the trace-level guarantee (`SourceToTrace.v`), so private accesses are
+automatically counted and the per-thread counter is provably rejected. C3's algebraic core
+(`Reduction.v`) and thread-count independence (`ChunkIndep.v`, L5) compose with C1.
 
 Remaining to reach a single end-to-end `Ostep`-level C1 theorem (optional hardening): connect the
 `ev_elim`-level `run` model to actual `Ostep` runs by showing each iteration's `dry_step` emits a

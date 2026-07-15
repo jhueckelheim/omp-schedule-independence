@@ -71,6 +71,25 @@ canonical-value characterisation (`raw_run_content_char`) and transports
 independence across the reordering via the permutation's positional bijection
 (`traces_indep_perm`).
 
+### Closing the source-to-trace gap (private accesses cannot be forgotten)
+
+The abstract class predicate `disjoint_write_class` is parameterised by
+per-iteration footprints; supplying under-approximate footprints (e.g. omitting an
+iteration's read of a per-thread private counter) would be unsound.
+[`src/SourceToTrace.v`](src/SourceToTrace.v) removes this hazard by taking the
+footprints *directly from the traces* and proving:
+
+- `class_eq_traces_indep` — `disjoint_write_class` at the trace-derived
+  footprints is **logically equivalent** to trace independence `traces_indep`
+  (axiom-free). The predicate therefore counts every access, private ones
+  included, and cannot be satisfied by a program with any cross-iteration
+  conflict.
+- `class_schedule_independent` — the source-level class predicate (at the real
+  footprints) **implies** the schedule-independence guarantee.
+- `private_counter_not_in_class` and `read_after_write_not_in_class` — a program
+  in which two distinct iterations share a private block (the per-thread counter)
+  is **provably outside** the class.
+
 ## Why this is faithful to OpenMP
 
 Two properties of the ClightOMP semantics make these results meaningful (verified
@@ -128,17 +147,26 @@ not covered.
   to be about traces (which include every private access) instead of about
   source-level shared footprints.
 
-  Caveat for the *abstract source-level* predicates in
-  [`src/ClassPredicates.v`](src/ClassPredicates.v): `read_foot`/`write_foot` are
-  soundness-relevant only if they over-approximate **all** of an iteration's
-  memory accesses, *including reads and writes of private blocks*. If a private
-  read is omitted from `read_foot`, the predicate can be wrongly satisfied for a
-  schedule-dependent program like the counter above. A dedicated write-before-read
-  predicate (class C2) and a proof connecting the source footprints to the
-  trace-level accesses (so private reads are automatically counted) is future work
-  (see [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PLAN.md)). Until then,
-  the trace-level `HardenedConfluence.v` result is the one that soundly handles
-  privates, precisely because it cannot "forget" a private access.
+  The abstract source-level predicate in
+  [`src/ClassPredicates.v`](src/ClassPredicates.v) is only sound if
+  `read_foot`/`write_foot` over-approximate **all** of an iteration's memory
+  accesses, including reads and writes of private blocks — otherwise the counter
+  above could spuriously satisfy it. This soundness condition is now
+  **discharged constructively** in
+  [`src/SourceToTrace.v`](src/SourceToTrace.v): the per-iteration footprints are
+  defined *directly from the actual execution traces*
+  (`trace_write_foot`/`trace_read_foot` = the write/read sets of the trace), so no
+  access — private or otherwise — can be omitted, and
+  - `class_eq_traces_indep` proves that `disjoint_write_class` at these
+    trace-derived footprints is **equivalent** to trace-level independence
+    (`traces_indep`) — axiom-free;
+  - `class_schedule_independent` derives the schedule-independence guarantee from
+    the class predicate at the real footprints;
+  - `private_counter_not_in_class` / `read_after_write_not_in_class` prove that a
+    program in which two distinct iterations share a (private) block — exactly the
+    per-thread counter — **cannot** satisfy the predicate.
+  So the counter is rejected by the *source-level* predicate too, not merely by
+  the trace-level theorem.
 
 - **Atomics, locks, and other synchronization.** These are deliberately **out of
   scope**, and correctly so: synchronization is exactly what lets one build
@@ -188,6 +216,7 @@ build.sh                a build driver (see below)
 | [`src/StepDiamond.v`](src/StepDiamond.v) | **C1 observable diamond** |
 | [`src/Confluence.v`](src/Confluence.v) | **C1 permutation-invariance theorem** (independence assumed) |
 | [`src/HardenedConfluence.v`](src/HardenedConfluence.v) | **race-agnostic theorem**: independence (read off the traces) ⇒ schedule-independent, else explicit race witness |
+| [`src/SourceToTrace.v`](src/SourceToTrace.v) | **soundness bridge**: `disjoint_write_class` at trace-derived footprints ⇔ `traces_indep`; source predicate ⇒ schedule-independence; per-thread counter provably rejected |
 
 ## Axiom hygiene
 
@@ -204,6 +233,9 @@ Every headline theorem was checked with `Print Assumptions`:
   (`classic`) only — for owner-uniqueness and for the totality of the
   independent-or-conflict disjunction. `schedule_independent_or_race` and
   `raw_run_permutation_agree` depend on `classic` and nothing else.
+- In `SourceToTrace.v`, the soundness bridge `class_eq_traces_indep` and the
+  rejection theorems are **axiom-free**; `class_schedule_independent` inherits
+  only `classic`.
 
 No `Admitted`, and no axioms introduced by this development.
 
