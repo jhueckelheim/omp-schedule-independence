@@ -49,6 +49,23 @@ level of observable memory, plus the algebraic core of a third:
   — an AC reduction over the loop's chunks is invariant under the thread-count and
   work split, via the `ChunkSplit` permutation invariant.
 
+> **Why there is no separate "C2".** The class labels come from the nested
+> hierarchy in [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PLAN.md)
+> (C0 ⊂ C1 ⊂ C2 ⊂ C3), where **C2 = C1 plus private variables that are written
+> before read** (per-iteration scratchpads). C2 was planned as a distinct step
+> requiring a "shared-vs-private footprint split" plus a private-erasure lemma,
+> but it is **not a separately mechanized class**: its content is now *subsumed*
+> by the C1 trace-level treatment. Because footprints are read off the actual
+> memory-event traces ([`src/SourceToTrace.v`](src/SourceToTrace.v)) and the
+> framing lemmas tolerate iteration-local `Alloc`/`Free`
+> ([`src/EvElimFrame.v`](src/EvElimFrame.v)), private accesses are just ordinary
+> events counted by the same independence check: a write-before-read private is an
+> iteration-local block that never conflicts (so it is admitted), while a
+> read-before-write private such as a per-thread counter *does* conflict and is
+> correctly rejected by C1's condition (see *Private variables…* below). The
+> reduction result (C3) does not depend on C2's erasure lemma, so it is
+> formalized independently — hence the C0 / C1 / C3 labelling here.
+
 ### A guarantee that holds even for possibly-racy programs
 
 The theorems above assume independence as a hypothesis. The **hardened** result
