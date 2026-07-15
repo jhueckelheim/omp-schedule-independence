@@ -38,12 +38,15 @@ Require Import Coq.Logic.Classical_Prop.
 Require Import VST.concurrency.openmp_sem.event_semantics.
 Require Import VST.concurrency.openmp_sem.sched_indep.ObsEquiv.
 Require Import VST.concurrency.openmp_sem.sched_indep.EvElimFrame.
-Require Import VST.concurrency.openmp_sem.sched_indep.StepDiamond.
-Require Import VST.concurrency.openmp_sem.sched_indep.Confluence.
 
 Open Scope Z_scope.
 
 Section Hardened.
+
+  (* A footprint that a trace's writes are confined to: any location outside
+     [foot] is outside every write of the trace. *)
+  Definition trace_writes_within (foot: footprint) (T: list mem_event) : Prop :=
+    forall b ofs, ~ foot b ofs -> outside_trace b ofs T.
 
   (* ---- read/write sets read off an actual trace ------------------------- *)
 
@@ -149,10 +152,6 @@ Section Hardened.
     - intros [mm [H1 H2]]. eapply ev_elim_app; eauto.
   Qed.
 
-  (* every trace in Ts is write-only *)
-  Definition all_wr_only (Ts: list (list mem_event)) : Prop :=
-    Forall wr_only_trace Ts.
-
   (* A location not written by ANY trace in the list is framed by the whole run. *)
   Lemma raw_other_frame :
     forall Ts m m' b ofs,
@@ -207,13 +206,6 @@ Section Hardened.
 
   (* ---- helpers connecting membership, positions, and write-ownership ----- *)
 
-  Lemma all_wr_only_app_inv :
-    forall Ts1 Ts2, all_wr_only (Ts1 ++ Ts2) -> all_wr_only Ts1 /\ all_wr_only Ts2.
-  Proof. intros. unfold all_wr_only in *. apply Forall_app in H. exact H. Qed.
-
-  Lemma all_wr_only_in :
-    forall Ts T, all_wr_only Ts -> In T Ts -> wr_only_trace T.
-  Proof. intros. eapply Forall_forall in H; eauto. Qed.
 
   (* Under list-independence, the owner of a written location is unique: if two
      positions both write (b,ofs), they are the same position. *)

@@ -1,5 +1,12 @@
 # Plan: Proving Schedule-Independence for a Class of OpenMP `parallel for` Loops in ClightOMP/Coq
 
+> Historical development log. It refers to intermediate files (`Diamond.v`,
+> `StepDiamond.v`, `Confluence.v`) that were later removed once superseded: the
+> `setN_get_in_indep` fact from `Diamond.v` now lives in `SetN.v`; `Confluence.v`'s
+> confluence result was subsumed by `HardenedConfluence.v`; and `StepDiamond.v`'s
+> `trace_writes_within` moved into `HardenedConfluence.v`. See the top-level
+> `README.md` for the current file set and results.
+
 This plan is grounded in the *actual* ClightOMP API (read from source, not invented). File/line
 references point at the real definitions the proof must be stated against.
 

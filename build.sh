@@ -40,8 +40,8 @@ cd "$CLIGHTOMP"
 FLAGS="$(cat _CoqProject) -Q sched_indep VST.concurrency.openmp_sem.sched_indep"
 
 for f in ObsEquiv ClassPredicates ChunkIndep Reduction StepFraming \
-         DryStepFraming OstepFraming OstepRun Diamond EvElimFrame \
-         StepDiamond Confluence HardenedConfluence SourceToTrace; do
+         DryStepFraming OstepFraming OstepRun SetN EvElimFrame \
+         HardenedConfluence SourceToTrace; do
   echo "COQC sched_indep/$f.v"
   $COQC $FLAGS "sched_indep/$f.v"
 done

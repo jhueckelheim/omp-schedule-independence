@@ -48,9 +48,6 @@ Section OstepRun.
     clos_refl_trans_1n Ostate (preserving_ostep foot).
 
   (* Any preserving step is in particular an Ostep. *)
-  Lemma preserving_ostep_is_ostep :
-    forall foot os os', preserving_ostep foot os os' -> @Ostep ge tpool os os'.
-  Proof. intros ??? [H _]; exact H. Qed.
 
   (* MAIN (T0, multi-step): a whole preserving run leaves observable contents
      unchanged from start to finish. Proof by induction on the closure, chaining

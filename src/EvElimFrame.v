@@ -30,7 +30,7 @@ Require Import compcert.lib.Maps.
 Require Import compcert.common.Values.
 Require Import compcert.common.Memory.
 Require Import VST.concurrency.openmp_sem.event_semantics.
-Require Import VST.concurrency.openmp_sem.sched_indep.Diamond.
+Require Import VST.concurrency.openmp_sem.sched_indep.SetN.
 
 Open Scope Z_scope.
 
@@ -56,21 +56,6 @@ Section EvElimFrame.
                                validity hypothesis in the frame lemma) *)
     | Free _ => True        (* free never changes contents *)
     end.
-
-  (* Trace effect alphabet allowed by the framing lemmas: Read, Write, Alloc,
-     Free -- i.e. everything the Clight event semantics can emit for a call tree
-     with iteration-local allocation/deallocation. (Read/Write already covered;
-     Alloc/Free now handled too.) *)
-  Definition wr_only_event (ev: mem_event) : Prop := True.
-
-  Definition wr_only_trace (T: list mem_event) : Prop :=
-    Forall wr_only_event T.
-
-  (* Every trace satisfies the (now-trivial) trace-class predicate: the framing
-     lemmas below tolerate Read/Write/Alloc/Free. Kept as a named lemma so that
-     downstream witnesses of `wr_only_trace` remain easy to supply. *)
-  Lemma wr_only_trace_any : forall T, wr_only_trace T.
-  Proof. intro T. apply Forall_forall. intros x _. exact I. Qed.
 
   (* A location is outside a whole trace's write-footprint. *)
   Definition outside_trace (b: block) (ofs: Z) (T: list mem_event) : Prop :=
@@ -209,15 +194,6 @@ Section EvElimFrame.
   Qed.
 
   (* A freshly Alloc'd block is distinct from any block valid before the alloc. *)
-  Lemma alloc_fresh_neq :
-    forall m lo hi m'' b' b,
-      Mem.alloc m lo hi = (m'', b') ->
-      Mem.valid_block m b ->
-      b <> b'.
-  Proof.
-    intros m lo hi m'' b' b Hal Hvb Heq. subst b'.
-    apply (Mem.fresh_block_alloc _ _ _ _ _ Hal). exact Hvb.
-  Qed.
 
   (* BASE-INDEPENDENCE: running the SAME trace T (same events, same bytes) on two
      base memories yields, at any location WRITTEN by T AND at a block valid in

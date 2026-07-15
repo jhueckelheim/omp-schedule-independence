@@ -65,15 +65,7 @@ Section StepFraming.
         observable output is identical to the starting memory. This is the
         memory-level core of T0 (pure class): a pure iteration's step does not
         change what any observer -- or any other iteration -- sees. *)
-  Lemma ev_elim_read_only_obs_equiv :
-    forall (foot: footprint) T m m',
-      read_only_trace T ->
-      ev_elim m T m' ->
-      obs_equiv foot m' m.
-  Proof.
-    intros foot T m m' Hro Hev b ofs _.
-    rewrite (ev_elim_read_only_id T m m' Hro Hev). reflexivity.
-  Qed.
+
 
   (* 3. Bridge to the actual thread-step layer: [dry_step] runs [ev_step semSem]
         (HybridMachine.v:167). For ANY event semantics, an [ev_step] whose
@@ -93,15 +85,5 @@ Section StepFraming.
     eapply ev_step_elim; eauto.
   Qed.
 
-  Lemma ev_step_read_only_obs_equiv :
-    forall (foot: footprint) c m T c' m',
-      ev_step sem c m T c' m' ->
-      read_only_trace T ->
-      obs_equiv foot m' m.
-  Proof.
-    intros foot c m T c' m' Hstep Hro.
-    eapply ev_elim_read_only_obs_equiv; [ exact Hro |].
-    eapply ev_step_elim; eauto.
-  Qed.
 
 End StepFraming.

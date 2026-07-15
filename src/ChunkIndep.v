@@ -65,17 +65,5 @@ Section ChunkIndependence.
         and every loop chunk is assigned to exactly one thread's workload
         (as a multiset membership consequence). Useful later for the
         disjoint-write footprint argument. *)
-  Lemma chunk_assigned_iff_in_chunks
-    (lb incr iter_num : Z) (thread_num : nat)
-    (chunks : list chunk) (team_workloads : list (list chunk))
-    (cs : ChunkSplit lb incr iter_num thread_num chunks team_workloads)
-    (c : chunk) :
-    In c (concat team_workloads) <-> In c chunks.
-  Proof.
-    pose proof (chunksplit_covers_chunks _ _ _ _ _ _ cs) as Hperm.
-    split; intro Hin.
-    - eapply Permutation_in; [ exact Hperm | exact Hin ].
-    - eapply Permutation_in; [ symmetry; exact Hperm | exact Hin ].
-  Qed.
 
 End ChunkIndependence.
