@@ -108,10 +108,18 @@ Build all with `sh sched_indep/build.sh`. Status of each file:
                         under-approximated `read_foot` could omit a private read.
 
 STATUS: C0 (pure, T0) and C1 (disjoint-write, T1) are machine-checked; the C1 result is also
-available in a RACE-AGNOSTIC form (`HardenedConfluence.v`); and the source-level class predicate is
-now SOUNDLY CONNECTED to the trace-level guarantee (`SourceToTrace.v`), so private accesses are
-automatically counted and the per-thread counter is provably rejected. C3's algebraic core
-(`Reduction.v`) and thread-count independence (`ChunkIndep.v`, L5) compose with C1.
+available in a RACE-AGNOSTIC form (`HardenedConfluence.v`); the source-level class predicate is
+SOUNDLY CONNECTED to the trace-level guarantee (`SourceToTrace.v`), so private accesses are
+automatically counted and the per-thread counter is provably rejected; and the framing lemmas in
+`EvElimFrame.v` now TOLERATE Alloc/Free events, so KNOWN (non-external) FUNCTION CALLS with
+stack-allocated locals (including pure functions with scratch memory) are supported. The frame/
+base-independence lemmas carry a `Mem.valid_block m b` hypothesis: the guarantee is about
+pre-existing (base-valid) memory, which correctly excludes freshly-allocated iteration-local blocks
+whose identities differ across schedules. C3's algebraic core (`Reduction.v`) and thread-count
+independence (`ChunkIndep.v`, L5) compose with C1.
+
+NOTE: the trace class predicate `wr_only_trace` is now trivially True (Read/Write/Alloc/Free all
+allowed); it is retained only so downstream witnesses remain easy to supply.
 
 Remaining to reach a single end-to-end `Ostep`-level C1 theorem (optional hardening): connect the
 `ev_elim`-level `run` model to actual `Ostep` runs by showing each iteration's `dry_step` emits a

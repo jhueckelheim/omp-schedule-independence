@@ -156,20 +156,21 @@ Section Hardened.
   (* A location not written by ANY trace in the list is framed by the whole run. *)
   Lemma raw_other_frame :
     forall Ts m m' b ofs,
-      all_wr_only Ts ->
+      Mem.valid_block m b ->
       (forall T, In T Ts -> ~ writes T b ofs) ->
       raw_run Ts m m' ->
       ZMap.get ofs (Mem.mem_contents m') !! b =
       ZMap.get ofs (Mem.mem_contents m) !! b.
   Proof.
-    induction Ts as [| T Ts IH]; intros m m' b ofs Hwr Hout Hrun.
+    induction Ts as [| T Ts IH]; intros m m' b ofs Hvb Hout Hrun.
     - unfold raw_run in Hrun; simpl in Hrun; subst; reflexivity.
     - unfold raw_run in Hrun; simpl in Hrun.
       apply ev_elim_split in Hrun. destruct Hrun as [mm [H1 H2]].
-      inversion Hwr as [| ? ? HwrT HwrTs]; subst.
+      assert (Hvbmm : Mem.valid_block mm b)
+        by (eapply ev_elim_valid_block; [ exact H1 | exact Hvb ]).
       transitivity (ZMap.get ofs (Mem.mem_contents mm) !! b).
       + apply IH; auto. intros T' HT'. apply Hout. right; auto.
-      + eapply ev_elim_wr_frame; [ exact HwrT | | exact H1 ].
+      + eapply ev_elim_wr_frame; [ exact Hvb | | exact H1 ].
         (* outside_trace b ofs T: T does not write (b,ofs) *)
         apply (trace_within_write_foot T). apply Hout. left; reflexivity.
   Qed.
@@ -179,24 +180,29 @@ Section Hardened.
      framing equalities. *)
   Lemma raw_run_split_owner :
     forall Ts1 T0 Ts2 m m' b ofs,
-      all_wr_only Ts1 -> wr_only_trace T0 -> all_wr_only Ts2 ->
+      Mem.valid_block m b ->
       (forall T, In T Ts1 -> ~ writes T b ofs) ->
       (forall T, In T Ts2 -> ~ writes T b ofs) ->
       raw_run (Ts1 ++ T0 :: Ts2) m m' ->
       exists mm mm',
         raw_run (T0 :: nil) mm mm' /\
+        Mem.valid_block mm b /\
         ZMap.get ofs (Mem.mem_contents mm) !! b =
         ZMap.get ofs (Mem.mem_contents m) !! b /\
         ZMap.get ofs (Mem.mem_contents m') !! b =
         ZMap.get ofs (Mem.mem_contents mm') !! b.
   Proof.
-    intros Ts1 T0 Ts2 m m' b ofs Hwr1 HwrT0 Hwr2 Hout1 Hout2 Hrun.
+    intros Ts1 T0 Ts2 m m' b ofs Hvb Hout1 Hout2 Hrun.
     apply raw_run_app in Hrun. destruct Hrun as [mm [Hr1 Hrest]].
     replace (T0 :: Ts2) with ((T0 :: nil) ++ Ts2) in Hrest by reflexivity.
     apply raw_run_app in Hrest. destruct Hrest as [mm' [Hr0 Hr2]].
-    exists mm, mm'. split; [ exact Hr0 |]. split.
-    - apply (raw_other_frame Ts1 m mm b ofs Hwr1 Hout1 Hr1).
-    - apply (raw_other_frame Ts2 mm' m' b ofs Hwr2 Hout2 Hr2).
+    assert (Hvbmm : Mem.valid_block mm b)
+      by (eapply ev_elim_valid_block; [ exact Hr1 | exact Hvb ]).
+    assert (Hvbmm' : Mem.valid_block mm' b)
+      by (eapply ev_elim_valid_block; [ exact Hr0 | exact Hvbmm ]).
+    exists mm, mm'. split; [ exact Hr0 |]. split; [ exact Hvbmm |]. split.
+    - apply (raw_other_frame Ts1 m mm b ofs Hvb Hout1 Hr1).
+    - apply (raw_other_frame Ts2 mm' m' b ofs Hvbmm' Hout2 Hr2).
   Qed.
 
   (* ---- helpers connecting membership, positions, and write-ownership ----- *)
@@ -291,43 +297,39 @@ Section Hardened.
      running just the unique owner trace on m (base-independent). We phrase the
      usable consequence directly. *)
   Lemma raw_run_content_char :
-    forall Ts m m',
-      all_wr_only Ts ->
+    forall Ts m m' b ofs,
+      Mem.valid_block m b ->
       traces_indep Ts ->
       raw_run Ts m m' ->
-      forall b ofs,
         (* no writer: content preserved *)
         ((forall T, In T Ts -> ~ writes T b ofs) /\
          ZMap.get ofs (Mem.mem_contents m') !! b =
          ZMap.get ofs (Mem.mem_contents m) !! b)
         \/
         (* unique owner T0 writes it; the content equals T0 run on SOME base mm
-           (the memory just before T0 executed). Base-independence later makes
-           the value the same across runs. We also record that T0 is write-only. *)
-        (exists T0 mm mm', In T0 Ts /\ writes T0 b ofs /\ wr_only_trace T0 /\
+           (the memory just before T0 executed), with b valid in mm. *)
+        (exists T0 mm mm', In T0 Ts /\ writes T0 b ofs /\ Mem.valid_block mm b /\
            raw_run (T0 :: nil) mm mm' /\
            ZMap.get ofs (Mem.mem_contents m') !! b =
            ZMap.get ofs (Mem.mem_contents mm') !! b).
   Proof.
-    intros Ts m m' Hwr Hindep Hrun b ofs.
+    intros Ts m m' b ofs Hvb Hindep Hrun.
     destruct (classic (exists T, In T Ts /\ writes T b ofs)) as [Hex | Hnex].
     - (* there is a writer; decompose around the unique owner *)
       right.
       destruct (indep_owner_decomp Ts b ofs Hindep Hex)
         as (Ts1 & T0 & Ts2 & HeqTs & Hw0 & Hpre & Hpost).
-      rewrite HeqTs in Hwr, Hrun.
-      apply all_wr_only_app_inv in Hwr as [Hwr1 HwrR].
-      inversion HwrR as [| ? ? HwrT0 Hwr2t]; subst.
-      destruct (raw_run_split_owner Ts1 T0 Ts2 m m' b ofs Hwr1 HwrT0 Hwr2t Hpre Hpost Hrun)
-        as (mm & mm' & Hr0 & Hmm & Hm').
-      exists T0, mm, mm'. split; [ | split; [ exact Hw0 | split; [ exact HwrT0 | split ] ] ].
-       + apply in_or_app; right; left; reflexivity.
+      rewrite HeqTs in Hrun.
+      destruct (raw_run_split_owner Ts1 T0 Ts2 m m' b ofs Hvb Hpre Hpost Hrun)
+        as (mm & mm' & Hr0 & Hvbmm & Hmm & Hm').
+      exists T0, mm, mm'. split; [ | split; [ exact Hw0 | split; [ exact Hvbmm | split ] ] ].
+       + rewrite HeqTs. apply in_or_app; right; left; reflexivity.
        + exact Hr0.
        + exact Hm'.
      - (* no writer: everyone frames it *)
        left. split.
        + intros T HinT HwT. apply Hnex. exists T; split; assumption.
-       + apply (raw_other_frame Ts m m' b ofs Hwr);
+       + apply (raw_other_frame Ts m m' b ofs Hvb);
            [ | exact Hrun ].
          intros T HinT HwT. apply Hnex. exists T; split; assumption.
    Qed.
@@ -380,20 +382,18 @@ Section Hardened.
   Theorem raw_run_permutation_agree :
     forall Ts Ts' m m1 m2,
       Permutation Ts Ts' ->
-      all_wr_only Ts ->
       traces_indep Ts ->
       raw_run Ts m m1 ->
       raw_run Ts' m m2 ->
       forall b ofs,
+        Mem.valid_block m b ->
         ZMap.get ofs (Mem.mem_contents m1) !! b =
         ZMap.get ofs (Mem.mem_contents m2) !! b.
   Proof.
-    intros Ts Ts' m m1 m2 Hperm Hwr Hindep Hrun1 Hrun2 b ofs.
-    assert (Hwr' : all_wr_only Ts')
-      by (unfold all_wr_only in *; eapply Permutation_Forall; eauto).
+    intros Ts Ts' m m1 m2 Hperm Hindep Hrun1 Hrun2 b ofs Hvb.
     assert (Hindep' : traces_indep Ts') by (eapply traces_indep_perm; eauto).
-    destruct (raw_run_content_char Ts m m1 Hwr Hindep Hrun1 b ofs) as [H1 | H1];
-    destruct (raw_run_content_char Ts' m m2 Hwr' Hindep' Hrun2 b ofs) as [H2 | H2].
+    destruct (raw_run_content_char Ts m m1 b ofs Hvb Hindep Hrun1) as [H1 | H1];
+    destruct (raw_run_content_char Ts' m m2 b ofs Hvb Hindep' Hrun2) as [H2 | H2].
     - (* no writer in either: both = base m *)
       destruct H1 as [_ Hc1]; destruct H2 as [_ Hc2]. rewrite Hc1, Hc2. reflexivity.
     - (* no writer in Ts but a writer in Ts': impossible, same multiset *)
@@ -408,8 +408,8 @@ Section Hardened.
       eapply Permutation_in; [ exact Hperm | exact Hin ].
     - (* writer in both: same owner T0; content = T0 run on its (differing)
          pre-bases, equal at (b,ofs) by base-independence. *)
-      destruct H1 as (T0 & mm1 & mm1' & Hin1 & Hw1 & Hwr01 & Hr1 & Hc1).
-      destruct H2 as (T0' & mm2 & mm2' & Hin2 & Hw2 & Hwr02 & Hr2 & Hc2).
+      destruct H1 as (T0 & mm1 & mm1' & Hin1 & Hw1 & Hvbmm1 & Hr1 & Hc1).
+      destruct H2 as (T0' & mm2 & mm2' & Hin2 & Hw2 & Hvbmm2 & Hr2 & Hc2).
       assert (HinT0'_Ts : In T0' Ts)
         by (eapply Permutation_in; [ apply Permutation_sym; exact Hperm | exact Hin2 ]).
       assert (HT0 : T0 = T0').
@@ -425,7 +425,7 @@ Section Hardened.
       unfold raw_run in Hr1, Hr2. simpl in Hr1, Hr2.
       rewrite app_nil_r in Hr1, Hr2.
       eapply ev_elim_wr_within_base_indep;
-        [ exact Hwr01 | exact Hr1 | exact Hr2 | exact Hw1 ].
+        [ exact Hvbmm1 | exact Hvbmm2 | exact Hr1 | exact Hr2 | exact Hw1 ].
   Qed.
 
   (* ---- THE THEOREM THAT IS VALID FOR AN ARBITRARY PROGRAM --------------- *)
@@ -446,17 +446,16 @@ Section Hardened.
   Theorem schedule_independent_or_race :
     forall Ts Ts' m m1 m2,
       Permutation Ts Ts' ->
-      all_wr_only Ts ->
       raw_run Ts m m1 ->
       raw_run Ts' m m2 ->
-      (forall b ofs,
+      (forall b ofs, Mem.valid_block m b ->
          ZMap.get ofs (Mem.mem_contents m1) !! b =
          ZMap.get ofs (Mem.mem_contents m2) !! b)
       \/ list_conflict Ts.
   Proof.
-    intros Ts Ts' m m1 m2 Hperm Hwr Hrun1 Hrun2.
+    intros Ts Ts' m m1 m2 Hperm Hrun1 Hrun2.
     destruct (indep_or_conflict Ts) as [Hindep | Hconf].
-    - left. intros b ofs.
+    - left. intros b ofs Hvb.
       eapply raw_run_permutation_agree; eauto.
     - right. exact Hconf.
   Qed.

@@ -104,15 +104,19 @@ The theorem, verbatim:
 Theorem class_schedule_independent :
   forall Ts Ts' m m1 m2,
     disjoint_write_class (trace_iters Ts)
-                         (trace_write_foot Ts) (trace_read_foot Ts) ->   (* C4 *)
-    all_wr_only Ts ->                                                    (* C3 *)
+                         (trace_write_foot Ts) (trace_read_foot Ts) ->   (* C3 *)
     Permutation Ts Ts' ->                                                (* C2 *)
-    raw_run Ts m m1 ->                                                   (* C1, C5 *)
-    raw_run Ts' m m2 ->                                                  (* C1, C5 *)
-    forall b ofs,                                                        (* C6 *)
+    raw_run Ts m m1 ->                                                   (* C1, C4 *)
+    raw_run Ts' m m2 ->                                                  (* C1, C4 *)
+    forall b ofs,
+      Mem.valid_block m b ->                                             (* C5 *)
       ZMap.get ofs (Mem.mem_contents m1) !! b =
-      ZMap.get ofs (Mem.mem_contents m2) !! b.
+      ZMap.get ofs (Mem.mem_contents m2) !! b.                          (* C6 *)
 ```
+
+(The trace bodies may contain iteration-local `Alloc`/`Free` events — function
+calls with stack-allocated locals — so there is no "read/write-only" hypothesis;
+see C3.)
 
 The subsections below name each condition, give it in natural language, and give
 its formal definition. `Ts : list (list mem_event)` is the loop modelled as a
@@ -163,26 +167,18 @@ but in this trace model it is part of how a schedule change is represented.)
 
 **Formal.** `Permutation Ts Ts'`.
 
-### C3 — Every iteration only reads and writes memory (no allocation or free)
+### (No effect-alphabet restriction) — Read/Write/Alloc/Free are all allowed
 
-**Natural language.** Each iteration's trace consists solely of `Read` and `Write`
-events — no `Alloc` and no `Free`. This is what "write-only trace" means here
-(reads are allowed; the name refers to the *effect* alphabet excluding
-alloc/free). Loop bodies that allocate or free memory during the loop are outside
-these theorems.
+Earlier versions required each iteration's trace to contain only `Read`/`Write`
+events. That restriction has been **removed**: the framing lemmas now tolerate
+`Alloc` and `Free` too. This is what makes **known (non-external) function calls
+with stack-allocated locals** supported — a call emits `Alloc` events on entry
+(one per `fn_vars` local) and a `Free` on return, and these are now handled:
+`Free` never changes memory contents, and `Alloc` only resets the *freshly*
+allocated block, which is never a block valid in the base memory (see C5). There
+is therefore no `all_wr_only`-style hypothesis in the theorem.
 
-**Formal.**
-
-```coq
-Definition wr_only_event (ev: mem_event) : Prop :=      (* EvElimFrame.v *)
-  match ev with Write _ _ _ => True | Read _ _ _ _ => True | _ => False end.
-Definition wr_only_trace (T: list mem_event) : Prop := Forall wr_only_event T.
-Definition all_wr_only (Ts: list (list mem_event)) : Prop := Forall wr_only_trace Ts.
-```
-
-Hypothesis: `all_wr_only Ts`.
-
-### C4 — Iterations are independent (Bernstein), with footprints read off the traces
+### C3 — Iterations are independent (Bernstein), with footprints read off the traces
 
 **Natural language.** Distinct iterations must not conflict: no two distinct
 iterations write a common location, and no iteration reads a location that another
@@ -226,9 +222,12 @@ Hypothesis: `disjoint_write_class (trace_iters Ts) (trace_write_foot Ts) (trace_
 
 By `class_eq_traces_indep` this is **equivalent** to the trace-level Bernstein
 condition, so it can be read instead as: for all distinct iterations `i ≠ j`, no
-write/write overlap and no read/write overlap between `Ts[i]` and `Ts[j]`.
+write/write overlap and no read/write overlap between `Ts[i]` and `Ts[j]`. Note
+this counts accesses to iteration-local allocated blocks too — but such blocks are
+per-iteration-fresh and never observed (C5), so they never create a spurious
+conflict across iterations.
 
-### C5 — Both schedules start from the same initial memory
+### C4 — Both schedules start from the same initial memory
 
 **Natural language.** The two runs being compared begin in the *same* starting
 memory `m`. The guarantee is about the effect of the loop from a common
@@ -236,35 +235,52 @@ pre-state.
 
 **Formal.** The shared `m` in `raw_run Ts m m1` and `raw_run Ts' m m2`.
 
-### C6 — What is guaranteed: equal final memory *contents* at every location
+### C5 — The observed location is a block valid in the initial memory
+
+**Natural language.** The guarantee is stated for each location `(b, ofs)` whose
+block `b` is **valid in the starting memory `m`** — i.e. pre-existing memory such
+as the shared output array. This condition is what makes `Alloc`/`Free` support
+sound: a function call's stack frame is a *freshly* allocated block, whose numeric
+identity legitimately differs between two schedules (different `nextblock` at the
+point of allocation), so it is deliberately excluded from the observation. Only
+pre-existing, observable memory is claimed schedule-independent — which is exactly
+what one wants. Validity is preserved through a run (allocation only grows the set
+of valid blocks), so a base-valid location stays valid throughout.
+
+**Formal.** `Mem.valid_block m b`.
+
+### C6 — What is guaranteed: equal final memory *contents* at every observed location
 
 **Natural language.** The conclusion is that the two results `m1` and `m2` have
-**identical byte contents at every memory location** `(b, ofs)`. The observable
-notion is final memory contents (`mem_contents`); the theorem does not assert
-equality of permission maps, `nextblock`, or any thread-local leftover state, and
-it is quantified over all locations, so in particular it covers the loop's entire
-output footprint.
+**identical byte contents at every base-valid location** `(b, ofs)`. The
+observable notion is final memory contents (`mem_contents`); the theorem does not
+assert equality of permission maps, `nextblock`, or freshly-allocated
+iteration-local state. Because it covers all base-valid locations, it covers the
+loop's entire (pre-existing) output footprint.
 
 **Formal.**
 
 ```coq
-forall b ofs, ZMap.get ofs (Mem.mem_contents m1) !! b
-            = ZMap.get ofs (Mem.mem_contents m2) !! b
+Mem.valid_block m b ->
+ZMap.get ofs (Mem.mem_contents m1) !! b = ZMap.get ofs (Mem.mem_contents m2) !! b
 ```
 
 ### Summary
 
 A loop is certified schedule-independent by `class_schedule_independent` exactly
-when it is modelled as a list of per-iteration read/write-only traces (C1, C3),
-schedule changes are reorderings of those traces (C2), the iterations are
-Bernstein-independent with footprints taken from the traces (C4), and runs are
-compared from a common initial memory (C5); the guarantee is bytewise-equal final
-memory (C6). Conditions C2 and C1 encode the modelling of an OpenMP `for` as a
-permutable list of iteration traces; connecting this trace model to full `Ostep`
-runs of an actual `#pragma omp for` is the remaining modelling assumption
-discussed under *Building* and *Repository layout*. The race-agnostic variant
-`schedule_independent_or_race` drops C4 and instead concludes *either* C6 *or* an
-explicit conflicting pair (`list_conflict Ts`).
+when it is modelled as a list of per-iteration memory-event traces run in order
+(C1) — the events may be any of `Read`/`Write`/`Alloc`/`Free`, so known-function
+calls with stack-allocated locals are allowed — schedule changes are reorderings
+of those traces (C2), the iterations are Bernstein-independent with footprints
+taken from the traces (C3), runs are compared from a common initial memory (C4),
+and the observed locations are valid in that initial memory (C5); the guarantee is
+bytewise-equal final memory at those locations (C6). Conditions C1 and C2 encode
+the modelling of an OpenMP `for` as a permutable list of iteration traces;
+connecting this trace model to full `Ostep` runs of an actual `#pragma omp for` is
+the remaining modelling assumption discussed under *Building* and *Repository
+layout*. The race-agnostic variant `schedule_independent_or_race` drops C3 and
+instead concludes *either* C6 *or* an explicit conflicting pair
+(`list_conflict Ts`).
 
 ## Why this is faithful to OpenMP
 
@@ -344,16 +360,29 @@ not covered.
   So the counter is rejected by the *source-level* predicate too, not merely by
   the trace-level theorem.
 
+- **Calls to known (non-external) functions, including with local scratch
+  memory.** Fully supported. A call to an internal function is transparent to the
+  trace model: it contributes the callee's own `Read`/`Write` events, plus (if the
+  callee has address-taken/stack locals `fn_vars`) an `Alloc` per local on entry
+  and a `Free` of the frame on return. Since the framing lemmas now tolerate
+  `Alloc`/`Free` — `Free` never changes contents; `Alloc` only touches the fresh,
+  non-observed block (C5) — such calls need no special treatment, and the
+  independence check (C3) automatically accounts for every location the call tree
+  reads or writes. In particular a **pure function** (even one that uses a local
+  scratch array) is supported. The only remaining exclusion is calls to *external*
+  functions (see below), whose semantics is axiomatized.
+
 - **Atomics, locks, and other synchronization.** These are deliberately **out of
   scope**, and correctly so: synchronization is exactly what lets one build
   schedule-dependent (yet data-race-free) outcomes. In ClightOMP, locks are a
   *separate* machine step (`syncStep`/`ext_step`), not a thread-internal
   `dry_step`. The C0 theorem excludes them by an explicit hypothesis ruling out
   `syncStep` (and `start_thread`/`pragmaStep`); the C1 model excludes them
-  structurally, since a lock acquire/release is a `sync_event` and an atomic
-  read-modify-write is not expressible as the plain write-only memory-event trace
-  that C1 quantifies over. OpenMP `atomic`/`critical`/explicit locks are not part
-  of the modelled loop-body fragment at all. The *sanctioned* way to have many
+  structurally, since a lock acquire/release is a `sync_event`, not one of the
+  `Read`/`Write`/`Alloc`/`Free` memory events the trace model is built from, and
+  an atomic read-modify-write is likewise not a plain memory-event trace. OpenMP
+  `atomic`/`critical`/explicit locks are not part of the modelled loop-body
+  fragment at all. The *sanctioned* way to have many
   iterations update shared state is a **reduction**, handled separately (C3,
   [`src/Reduction.v`](src/Reduction.v)) via associativity/commutativity of the
   combiner — a naive shared `+=` would be a write/write overlap that C1 forbids.

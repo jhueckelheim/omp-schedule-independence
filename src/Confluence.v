@@ -115,24 +115,29 @@ Section Confluence.
      iteration's footprint), every OTHER iteration's trace frames (b,ofs), and
      it0's trace determines it base-independently. *)
 
-  (* An iteration in the list frames every location outside its footprint. *)
+  (* An iteration in the list frames every location outside its footprint, at any
+     block valid in the starting memory. *)
   Lemma other_iters_frame :
     forall its m m' b ofs,
+      Mem.valid_block m b ->
       (forall it, In it its -> ~ it_foot it b ofs) ->
       run its m m' ->
       ZMap.get ofs (Mem.mem_contents m') !! b =
       ZMap.get ofs (Mem.mem_contents m) !! b.
   Proof.
-    induction its as [| it its IH]; intros m m' b ofs Hout Hrun.
+    induction its as [| it its IH]; intros m m' b ofs Hvb Hout Hrun.
     - unfold run in Hrun. simpl in Hrun. subst; reflexivity.
     - unfold run in Hrun. simpl in Hrun.
       apply ev_elim_split in Hrun. destruct Hrun as [mm [Hrun1 Hrun2]].
+      (* b valid in mm (head run preserves validity) *)
+      assert (Hvbmm : Mem.valid_block mm b)
+        by (eapply ev_elim_valid_block; [ exact Hrun1 | exact Hvb ]).
       transitivity (ZMap.get ofs (Mem.mem_contents mm) !! b).
       + apply IH; auto.
         intros it' Hin'. apply Hout. right. exact Hin'.
       + (* head iteration frames (b,ofs) since (b,ofs) not in it_foot it *)
         eapply ev_elim_wr_frame.
-        * exact (it_wr it).
+        * exact Hvb.
         * apply (it_within it). apply Hout. left; reflexivity.
         * exact Hrun1.
   Qed.
@@ -143,27 +148,34 @@ Section Confluence.
      frame (b,ofs). This peels the list around the single owner. *)
   Lemma run_split_owner :
     forall its1 it0 its2 m m' b ofs,
+      Mem.valid_block m b ->
       it_foot it0 b ofs ->
       (forall it, In it its1 -> ~ it_foot it b ofs) ->
       (forall it, In it its2 -> ~ it_foot it b ofs) ->
       run (its1 ++ it0 :: its2) m m' ->
       exists mm mm',
         run its1 m mm /\ run (it0 :: nil) mm mm' /\
+        Mem.valid_block mm b /\
         ZMap.get ofs (Mem.mem_contents mm) !! b =
         ZMap.get ofs (Mem.mem_contents m) !! b /\
         ZMap.get ofs (Mem.mem_contents m') !! b =
         ZMap.get ofs (Mem.mem_contents mm') !! b.
   Proof.
-    intros its1 it0 its2 m m' b ofs Hown Hout1 Hout2 Hrun.
+    intros its1 it0 its2 m m' b ofs Hvb Hown Hout1 Hout2 Hrun.
     apply run_app in Hrun. destruct Hrun as [mm [Hr1 Hrest]].
     replace (it0 :: its2) with ((it0 :: nil) ++ its2) in Hrest by reflexivity.
     apply run_app in Hrest. destruct Hrest as [mm' [Hr0 Hr2]].
+    assert (Hvbmm : Mem.valid_block mm b)
+      by (eapply ev_elim_valid_block; [ exact Hr1 | exact Hvb ]).
+    assert (Hvbmm' : Mem.valid_block mm' b)
+      by (eapply ev_elim_valid_block; [ exact Hr0 | exact Hvbmm ]).
     exists mm, mm'. split; [ exact Hr1 |]. split; [ exact Hr0 |].
+    split; [ exact Hvbmm |].
     split.
     - (* mm = m at (b,ofs): its1 frames it *)
-      apply (other_iters_frame its1 m mm b ofs Hout1 Hr1).
+      apply (other_iters_frame its1 m mm b ofs Hvb Hout1 Hr1).
     - (* m' = mm' at (b,ofs): its2 frames it *)
-      apply (other_iters_frame its2 mm' m' b ofs Hout2 Hr2).
+      apply (other_iters_frame its2 mm' m' b ofs Hvbmm' Hout2 Hr2).
   Qed.
 
   (* MAIN (T1 / L4): two runs of permuted iteration-lists, with pairwise-disjoint
@@ -195,11 +207,14 @@ Section Confluence.
            (forall it, In it post -> ~ it_foot it b ofs) /\
            (* same owner trace as in its (owner determined by footprint) *)
            True) ->
-      run its m m1 ->
-      run its' m m2 ->
-      agree_on (union_foot its) m1 m2.
-  Proof.
-    intros its its' m m1 m2 Hperm Hdisj Howner Howner' Hrun1 Hrun2 b ofs Hu.
+       (* observed (union) locations are valid in the starting memory *)
+       (forall b ofs, union_foot its b ofs -> Mem.valid_block m b) ->
+       run its m m1 ->
+       run its' m m2 ->
+       agree_on (union_foot its) m1 m2.
+   Proof.
+     intros its its' m m1 m2 Hperm Hdisj Howner Howner' Hvalid Hrun1 Hrun2 b ofs Hu.
+     assert (Hvb : Mem.valid_block m b) by (eapply Hvalid; exact Hu).
     (* find the owner in its and in its' *)
     destruct (Howner b ofs Hu) as (pre & it0 & post & Heq & Hf0 & Hpre & Hpost).
     (* the union of its' equals union of its (permutation), so the same location
@@ -213,10 +228,10 @@ Section Confluence.
     destruct (Howner' b ofs Hu) as (pre' & it0' & post' & Heq' & Hf0' & Hpre' & Hpost' & _).
     (* split both runs around their owners *)
     subst its its'.
-    destruct (run_split_owner pre it0 post m m1 b ofs Hf0 Hpre Hpost Hrun1)
-      as (mm & mm' & Hr1a & Hr1b & Hmm & Hm1).
-    destruct (run_split_owner pre' it0' post' m m2 b ofs Hf0' Hpre' Hpost' Hrun2)
-      as (nn & nn' & Hr2a & Hr2b & Hnn & Hm2).
+    destruct (run_split_owner pre it0 post m m1 b ofs Hvb Hf0 Hpre Hpost Hrun1)
+      as (mm & mm' & Hr1a & Hr1b & Hvbmm & Hmm & Hm1).
+    destruct (run_split_owner pre' it0' post' m m2 b ofs Hvb Hf0' Hpre' Hpost' Hrun2)
+      as (nn & nn' & Hr2a & Hr2b & Hvbnn & Hnn & Hm2).
     (* it0 and it0' both own (b,ofs); with pairwise-disjoint footprints across a
        permutation, the owner is unique, so it0 = it0'. We derive this from the
        fact that both are elements owning (b,ofs) and footprints are disjoint. *)
@@ -273,7 +288,7 @@ Section Confluence.
       unfold run in Hr1b, Hr2b. simpl in Hr1b, Hr2b.
       rewrite app_nil_r in Hr1b, Hr2b.
       eapply ev_elim_wr_within_base_indep;
-        [ exact (it_wr it0) | exact Hr1b | exact Hr2b | exact Hw ].
+        [ exact Hvbmm | exact Hvbnn | exact Hr1b | exact Hr2b | exact Hw ].
     - (* it0 does not write (b,ofs): both framed to their base, bases agree (=m) *)
       unfold run in Hr1b, Hr2b. simpl in Hr1b, Hr2b.
       rewrite app_nil_r in Hr1b, Hr2b.
@@ -286,8 +301,8 @@ Section Confluence.
         destruct (zle (oo + Z.of_nat (length bs)) ofs); [ right; lia |].
         exfalso. apply Hnw. apply Exists_exists. exists (Write bb oo bs).
         split; [ exact Hx |]. simpl. split; [ reflexivity | lia ]. }
-      rewrite (ev_elim_wr_frame _ mm mm' b ofs (it_wr it0) Hout0 Hr1b).
-      rewrite (ev_elim_wr_frame _ nn nn' b ofs (it_wr it0) Hout0 Hr2b).
+      rewrite (ev_elim_wr_frame _ mm mm' b ofs Hvbmm Hout0 Hr1b).
+      rewrite (ev_elim_wr_frame _ nn nn' b ofs Hvbnn Hout0 Hr2b).
       rewrite Hmm, Hnn. reflexivity.
   Qed.
 

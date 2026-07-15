@@ -41,17 +41,17 @@ Section StepDiamond.
     forall b ofs, ~ foot b ofs -> outside_trace b ofs T.
 
   (* If a trace writes within [foot], it preserves contents everywhere outside
-     [foot]. This is the frame lemma specialised to a footprint. *)
+     [foot], at any block VALID in the base memory. (Validity excludes the
+     freshly-allocated iteration-local blocks, which are not observable.) *)
   Lemma ev_elim_frame_footprint :
     forall (foot: footprint) T m m',
-      wr_only_trace T ->
       trace_writes_within foot T ->
       ev_elim m T m' ->
-      forall b ofs, ~ foot b ofs ->
+      forall b ofs, Mem.valid_block m b -> ~ foot b ofs ->
         ZMap.get ofs (Mem.mem_contents m') !! b =
         ZMap.get ofs (Mem.mem_contents m) !! b.
   Proof.
-    intros foot T m m' Hwr Hwithin Hev b ofs Hnot.
+    intros foot T m m' Hwithin Hev b ofs Hvb Hnot.
     eapply ev_elim_wr_frame; eauto.
   Qed.
 
@@ -69,7 +69,6 @@ Section StepDiamond.
      effect does not depend on locations the other trace touched (disjoint). *)
   Lemma ev_elim_diamond_obs :
     forall (foot1 foot2: footprint) T1 T2 m m12a m12 m21a m21,
-      wr_only_trace T1 -> wr_only_trace T2 ->
       trace_writes_within foot1 T1 ->
       trace_writes_within foot2 T2 ->
       (forall b ofs, foot1 b ofs -> foot2 b ofs -> False) ->
@@ -77,13 +76,16 @@ Section StepDiamond.
       ev_elim m   T1 m12a -> ev_elim m12a T2 m12 ->
       (* order B: T2 then T1 *)
       ev_elim m   T2 m21a -> ev_elim m21a T1 m21 ->
-      (* agreement on the union of footprints *)
-      forall b ofs, (foot1 b ofs \/ foot2 b ofs) ->
+      (* agreement on the union of footprints, at locations valid in the base *)
+      forall b ofs, Mem.valid_block m b -> (foot1 b ofs \/ foot2 b ofs) ->
         ZMap.get ofs (Mem.mem_contents m12) !! b =
         ZMap.get ofs (Mem.mem_contents m21) !! b.
   Proof.
     intros foot1 foot2 T1 T2 m m12a m12 m21a m21
-           Hwr1 Hwr2 Hin1 Hin2 Hdisj HA1 HA2 HB1 HB2 b ofs Hunion.
+           Hin1 Hin2 Hdisj HA1 HA2 HB1 HB2 b ofs Hvbm Hunion.
+    (* validity of b propagates to the intermediate memories *)
+    assert (Hvb12a : Mem.valid_block m12a b) by (eapply ev_elim_valid_block; eauto).
+    assert (Hvb21a : Mem.valid_block m21a b) by (eapply ev_elim_valid_block; eauto).
     destruct Hunion as [Hf1 | Hf2].
     - (* (b,ofs) in foot1 (hence NOT in foot2, by disjointness) *)
       assert (Hnf2: ~ foot2 b ofs) by (intro; eapply Hdisj; eauto).
@@ -91,12 +93,12 @@ Section StepDiamond.
          m12 = m12a at (b,ofs). *)
       assert (E12: ZMap.get ofs (Mem.mem_contents m12) !! b =
                    ZMap.get ofs (Mem.mem_contents m12a) !! b)
-        by (eapply ev_elim_frame_footprint; [ exact Hwr2 | exact Hin2 | exact HA2 | exact Hnf2 ]).
+        by (eapply ev_elim_frame_footprint; [ exact Hin2 | exact HA2 | exact Hvb12a | exact Hnf2 ]).
       (* order B: on foot1, T2 (the first step) is a frame, so m21a = m at
          (b,ofs). *)
       assert (E21a: ZMap.get ofs (Mem.mem_contents m21a) !! b =
                     ZMap.get ofs (Mem.mem_contents m) !! b)
-        by (eapply ev_elim_frame_footprint; [ exact Hwr2 | exact Hin2 | exact HB1 | exact Hnf2 ]).
+        by (eapply ev_elim_frame_footprint; [ exact Hin2 | exact HB1 | exact Hvbm | exact Hnf2 ]).
       (* Now both m12 and m21 at (b,ofs) reduce to T1's effect:
            m12 = m12a = (T1 on m) at (b,ofs)     [E12, then HA1]
            m21 = (T1 on m21a) at (b,ofs), and m21a = m on foot1 [E21a]
@@ -113,7 +115,7 @@ Section StepDiamond.
       + (* T1 writes (b,ofs): base-independence gives m12a = m21 at (b,ofs) *)
         rewrite E12.
         eapply (ev_elim_wr_within_base_indep T1 m m12a m21a m21 b ofs);
-          [ exact Hwr1 | exact HA1 | exact HB2 | exact Hw1 ].
+          [ exact Hvbm | exact Hvb21a | exact HA1 | exact HB2 | exact Hw1 ].
       + (* T1 does NOT write (b,ofs): T1 frames it in both runs *)
         assert (Hout1: outside_trace b ofs T1).
         { unfold outside_trace. apply Forall_forall. intros x Hx.
@@ -125,17 +127,17 @@ Section StepDiamond.
           exfalso. apply Hnw1. apply Exists_exists. exists (Write bb oo bs).
           split; [ exact Hx |]. simpl. split; [ reflexivity | lia ]. }
         rewrite E12.
-        rewrite (ev_elim_wr_frame T1 m m12a b ofs Hwr1 Hout1 HA1).
-        rewrite (ev_elim_wr_frame T1 m21a m21 b ofs Hwr1 Hout1 HB2).
+        rewrite (ev_elim_wr_frame T1 m m12a b ofs Hvbm Hout1 HA1).
+        rewrite (ev_elim_wr_frame T1 m21a m21 b ofs Hvb21a Hout1 HB2).
         symmetry. exact E21a.
     - (* symmetric: (b,ofs) in foot2, not in foot1 *)
       assert (Hnf1: ~ foot1 b ofs) by (intro; eapply Hdisj; eauto).
       assert (E21: ZMap.get ofs (Mem.mem_contents m21) !! b =
                    ZMap.get ofs (Mem.mem_contents m21a) !! b)
-        by (eapply ev_elim_frame_footprint; [ exact Hwr1 | exact Hin1 | exact HB2 | exact Hnf1 ]).
+        by (eapply ev_elim_frame_footprint; [ exact Hin1 | exact HB2 | exact Hvb21a | exact Hnf1 ]).
       assert (E12a: ZMap.get ofs (Mem.mem_contents m12a) !! b =
                     ZMap.get ofs (Mem.mem_contents m) !! b)
-        by (eapply ev_elim_frame_footprint; [ exact Hwr1 | exact Hin1 | exact HA1 | exact Hnf1 ]).
+        by (eapply ev_elim_frame_footprint; [ exact Hin1 | exact HA1 | exact Hvbm | exact Hnf1 ]).
       destruct (Exists_dec (written_by b ofs) T2) as [Hw2 | Hnw2].
       { intro x. destruct x as [bb oo bs | | |].
         - unfold written_by. destruct (peq b bb).
@@ -149,7 +151,7 @@ Section StepDiamond.
         rewrite E21.
         symmetry.
         eapply (ev_elim_wr_within_base_indep T2 m m21a m12a m12 b ofs);
-          [ exact Hwr2 | exact HB1 | exact HA2 | exact Hw2 ].
+          [ exact Hvbm | exact Hvb12a | exact HB1 | exact HA2 | exact Hw2 ].
       + (* T2 does not write (b,ofs): frame in both runs *)
         assert (Hout2: outside_trace b ofs T2).
         { unfold outside_trace. apply Forall_forall. intros x Hx.
@@ -161,8 +163,8 @@ Section StepDiamond.
           exfalso. apply Hnw2. apply Exists_exists. exists (Write bb oo bs).
           split; [ exact Hx |]. simpl. split; [ reflexivity | lia ]. }
         rewrite E21.
-        rewrite (ev_elim_wr_frame T2 m m21a b ofs Hwr2 Hout2 HB1).
-        rewrite (ev_elim_wr_frame T2 m12a m12 b ofs Hwr2 Hout2 HA2).
+        rewrite (ev_elim_wr_frame T2 m m21a b ofs Hvbm Hout2 HB1).
+        rewrite (ev_elim_wr_frame T2 m12a m12 b ofs Hvb12a Hout2 HA2).
         exact E12a.
   Qed.
 

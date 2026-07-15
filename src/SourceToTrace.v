@@ -149,21 +149,24 @@ Section Payoff.
   (* ---- 2. PAYOFF: source class predicate ==> schedule-independence ------- *)
 
   (* If the disjoint-write class holds at the ACTUAL trace footprints (so no
-     private access is forgotten) for a write-only trace list, then any two
-     schedules (permutations) agree on observable memory. *)
+     private access is forgotten), then any two schedules (permutations) agree on
+     observable memory, at every location valid in the starting memory. The
+     trace bodies may now contain iteration-local Alloc/Free (function calls with
+     stack-allocated locals): those blocks are fresh, hence not valid in the base,
+     hence excluded from the observation -- which is exactly correct. *)
   Theorem class_schedule_independent :
     forall Ts Ts' m m1 m2,
       disjoint_write_class (trace_iters Ts)
                            (trace_write_foot Ts) (trace_read_foot Ts) ->
-      all_wr_only Ts ->
       Permutation Ts Ts' ->
       raw_run Ts m m1 ->
       raw_run Ts' m m2 ->
       forall b ofs,
+        Mem.valid_block m b ->
         ZMap.get ofs (Mem.mem_contents m1) !! b =
         ZMap.get ofs (Mem.mem_contents m2) !! b.
   Proof.
-    intros Ts Ts' m m1 m2 Hclass Hwr Hperm Hrun1 Hrun2 b ofs.
+    intros Ts Ts' m m1 m2 Hclass Hperm Hrun1 Hrun2 b ofs Hvb.
     apply (class_eq_traces_indep Ts) in Hclass.
     eapply raw_run_permutation_agree; eauto.
   Qed.
