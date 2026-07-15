@@ -85,11 +85,15 @@ against the source; see [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PL
   implementation-defined schedule (and any explicit `static/dynamic/guided`, which
   is just one concrete `ChunkSplit`).
 
-- **Private variables are real per-thread copies.** Privatization allocates a
-  **fresh memory block** per privatized identifier (`Mem.alloc`, which returns a
-  block at the monotonically increasing `nextblock`, distinct from every block
-  ever allocated) and rewrites the thread's local environment, restoring/freeing
-  at construct exit. `firstprivate` is a deterministic initializer.
+- **Private variables are per-THREAD copies that persist across a thread's
+  iterations.** Privatization allocates a **fresh memory block** per privatized
+  identifier (`Mem.alloc`, distinct from every block ever allocated) and rewrites
+  the thread's local environment. Crucially, in `transform_state_for` the `Spriv`
+  scope wraps the thread's *entire workload* (`transform_chunks` folds all of a
+  thread's chunks into one sequence inside a single privatization), so a private
+  copy is allocated **once per thread, not once per iteration**, and its value
+  survives from one iteration to the next on the same thread. `firstprivate` is a
+  deterministic initializer.
 
 ### Private variables, reads-after-writes, and synchronization
 
@@ -102,23 +106,39 @@ not covered.
   deliberate shorthand for the full independence (Bernstein) condition — see the
   C1 description above.
 
-- **Private variables overwritten before use.** A `private` variable written
-  before it is read in each iteration produces accesses that overlap *at the
-  source-identifier level* across iterations, but **not at the memory level**:
-  privatization gives each thread's copy a freshly allocated, mutually distinct
-  block. Because the copy is written before being read, its incoming (undefined)
-  value is never observed, so the private carries **no cross-iteration
-  dependency** and cannot affect the observable shared result — regardless of
-  schedule or thread count. This is handled correctly by the semantics' fresh-
-  block allocation. Note the current C1 mechanization reasons about the *shared*
-  footprint only; private blocks are outside it by construction (freshness), so
-  they need no extra hypothesis. A dedicated write-before-read predicate (class
-  C2) that discharges this from the program text is future work (see
-  [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PLAN.md)). A private read
-  *before* any write would observe the fresh block's undefined initial contents —
-  per-iteration-local and deterministic, but a use-of-uninitialized issue
-  orthogonal to schedule-dependence, so the write-before-read condition is what
-  makes the private a genuine scratchpad.
+- **Private variables carry state across a thread's iterations, and this can be
+  schedule-dependent.** Because privatization is per-thread (above), a private is
+  *not* automatically a safe per-iteration scratchpad. It is safe only when it is
+  **written before it is read within each iteration**, so that no value flows from
+  one iteration to a later one through it. A private that is *read before written*
+  in an iteration — e.g. a **per-thread counter** `c` incremented each iteration
+  and stored as `w(i) = c` — genuinely produces schedule-dependent output: even
+  though the `w(i)` write sets are disjoint across threads, the final array lets an
+  observer read off each thread's iteration count, i.e. the load distribution the
+  scheduler chose.
+
+  Such a program is **correctly *not* certified** by the hardened theorem
+  ([`src/HardenedConfluence.v`](src/HardenedConfluence.v)), because that theorem's
+  independence hypothesis is read off the **actual memory-event traces**: the
+  counter block `c` is *read* by later iterations and *written* by earlier ones,
+  so distinct iterations on the same thread have a read/write (and write/write)
+  overlap on `c`. That is exactly a `conflict2`, so `traces_indep` is false and
+  `schedule_independent_or_race` returns its **race-witness** disjunct rather than
+  claiming schedule-independence. This is the payoff of hardening the hypothesis
+  to be about traces (which include every private access) instead of about
+  source-level shared footprints.
+
+  Caveat for the *abstract source-level* predicates in
+  [`src/ClassPredicates.v`](src/ClassPredicates.v): `read_foot`/`write_foot` are
+  soundness-relevant only if they over-approximate **all** of an iteration's
+  memory accesses, *including reads and writes of private blocks*. If a private
+  read is omitted from `read_foot`, the predicate can be wrongly satisfied for a
+  schedule-dependent program like the counter above. A dedicated write-before-read
+  predicate (class C2) and a proof connecting the source footprints to the
+  trace-level accesses (so private reads are automatically counted) is future work
+  (see [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PLAN.md)). Until then,
+  the trace-level `HardenedConfluence.v` result is the one that soundly handles
+  privates, precisely because it cannot "forget" a private access.
 
 - **Atomics, locks, and other synchronization.** These are deliberately **out of
   scope**, and correctly so: synchronization is exactly what lets one build

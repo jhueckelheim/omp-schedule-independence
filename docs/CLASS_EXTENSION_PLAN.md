@@ -20,11 +20,21 @@ All references are to real definitions:
 Before drawing the class boundary we note two facts about the *modeled fragment*, because a
 program can only violate schedule-independence through effects the semantics represents.
 
-- **Private variables are fresh, disjoint memory.** `privatization` calls `alloc_pvs`
-  (`reduction.v`) which `Mem.alloc`s a NEW block per privatized ident and rewrites the local
-  env. So two threads' private copies never alias. A private variable that is *written before
-  read within an iteration* therefore carries no cross-iteration dependency — this is the
-  intended safe case in the prompt.
+- **Private variables are fresh, disjoint memory — but PER THREAD, not per iteration.**
+  `privatization` calls `alloc_pvs` (`reduction.v`) which `Mem.alloc`s a NEW block per
+  privatized ident and rewrites the local env, so two threads' private copies never alias.
+  HOWEVER, in `transform_state_for` the `Spriv` scope wraps the thread's *entire workload*
+  (`transform_chunks` folds all of a thread's chunks into one sequence), so the private block is
+  allocated ONCE PER THREAD and its value PERSISTS across that thread's iterations. Consequently
+  a private is a safe per-iteration scratchpad ONLY when it is *written before read within each
+  iteration*. A private that is *read before written* — e.g. a per-thread iteration counter `c`
+  with `c := c+1; w(i) := c` — carries state across iterations and yields SCHEDULE-DEPENDENT
+  output (the final `w[]` reveals each thread's load), despite disjoint `w(i)` write sets. Such
+  a program has cross-iteration read/write overlap on `c` at the memory-trace level and is
+  therefore (correctly) flagged as a conflict by `HardenedConfluence.schedule_independent_or_race`,
+  NOT certified as schedule-independent. Soundness of the abstract source-level predicates
+  (`disjoint_write_class`) requires `read_foot`/`write_foot` to include ALL accesses, including
+  reads/writes of private blocks; otherwise the counter example would spuriously satisfy them.
 
 - **Thread identity is NOT a value available to the loop body.** There is no
   `omp_get_thread_num` primitive in the modeled semantics. Thread number enters ONLY inside
