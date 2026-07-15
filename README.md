@@ -6,7 +6,7 @@ number of threads**. The proofs are stated and machine-checked against the
 [ClightOMP](https://github.com/dkxb/ClightOMP) formal semantics of C-with-OpenMP
 (a fork of [VST](https://github.com/PrincetonUniversity/VST) / CompCert).
 
-The development is self-contained (12 `.v` files under [`src/`](src/)), adds
+The development is self-contained (14 `.v` files under [`src/`](src/)), adds
 nothing to and modifies nothing in ClightOMP, and every headline theorem has been
 checked with `Print Assumptions` (no `Admitted`, no new axioms).
 
@@ -86,9 +86,185 @@ footprints *directly from the traces* and proving:
   conflict.
 - `class_schedule_independent` — the source-level class predicate (at the real
   footprints) **implies** the schedule-independence guarantee.
-- `private_counter_not_in_class` and `read_after_write_not_in_class` — a program
-  in which two distinct iterations share a private block (the per-thread counter)
-  is **provably outside** the class.
+ - `private_counter_not_in_class` and `read_after_write_not_in_class` — a program
+   in which two distinct iterations share a private block (the per-thread counter)
+   is **provably outside** the class.
+
+## Exact conditions
+
+This section is the precise, complete specification: it lists **every** hypothesis
+of the headline theorem `class_schedule_independent`
+([`src/SourceToTrace.v`](src/SourceToTrace.v)), which is the one that connects the
+source-level class predicate to the schedule-independence guarantee. All formal
+snippets are transcribed verbatim from the `.v` sources.
+
+The theorem, verbatim:
+
+```coq
+Theorem class_schedule_independent :
+  forall Ts Ts' m m1 m2,
+    disjoint_write_class (trace_iters Ts)
+                         (trace_write_foot Ts) (trace_read_foot Ts) ->   (* C4 *)
+    all_wr_only Ts ->                                                    (* C3 *)
+    Permutation Ts Ts' ->                                                (* C2 *)
+    raw_run Ts m m1 ->                                                   (* C1, C5 *)
+    raw_run Ts' m m2 ->                                                  (* C1, C5 *)
+    forall b ofs,                                                        (* C6 *)
+      ZMap.get ofs (Mem.mem_contents m1) !! b =
+      ZMap.get ofs (Mem.mem_contents m2) !! b.
+```
+
+The subsections below name each condition, give it in natural language, and give
+its formal definition. `Ts : list (list mem_event)` is the loop modelled as a
+list of per-iteration memory-event traces; `Ts'` is the same loop under a
+different schedule; `m` is the starting memory; `m1`, `m2` the two results.
+
+The underlying event alphabet and the run relation:
+
+```coq
+Inductive mem_event :=                             (* event_semantics.v *)
+  Write : block -> Z -> list memval -> mem_event
+| Read  : block -> Z -> Z -> list memval -> mem_event
+| Alloc : block -> Z -> Z -> mem_event
+| Free  : list (block * Z * Z) -> mem_event.
+
+Fixpoint ev_elim (m:mem) (T: list mem_event) (m':mem) : Prop :=  (* run one trace *)
+  match T with
+  | nil => m' = m
+  | Read  b ofs n bytes :: R => Mem.loadbytes m b ofs n = Some bytes /\ ev_elim m R m'
+  | Write b ofs bytes   :: R => exists m'', Mem.storebytes m b ofs bytes = Some m'' /\ ev_elim m'' R m'
+  | Alloc b lo hi       :: R => exists m'', Mem.alloc m lo hi = (m'',b)          /\ ev_elim m'' R m'
+  | Free  l             :: R => exists m'', Mem.free_list m l = Some m''         /\ ev_elim m'' R m'
+  end.
+
+Definition raw_run (Ts: list (list mem_event)) (m m': mem) : Prop :=
+  ev_elim m (concat Ts) m'.        (* run the iterations in list order from m *)
+```
+
+### C1 — The loop is a list of per-iteration memory-event traces run in order
+
+**Natural language.** The loop under a given schedule is modelled as a *list* of
+per-iteration traces `Ts`, and a run executes them in that list order, threading
+the memory through (each `Write` is a `storebytes`, each `Read` must reload the
+recorded bytes). "Running the loop under this schedule from memory `m` to result
+`m1`" is exactly `raw_run Ts m m1`. Reordering (a different schedule) is a
+different list `Ts'` with `raw_run Ts' m m2`.
+
+**Formal.** `raw_run Ts m m1` and `raw_run Ts' m m2` (definitions above).
+
+### C2 — The two schedules are a reordering of the *same* per-iteration traces
+
+**Natural language.** A schedule change is modelled purely as permuting the order
+in which the (unchanged) per-iteration traces run: `Ts'` is a permutation of `Ts`.
+Equivalently, each iteration performs the *same* sequence of reads/writes of the
+*same* bytes regardless of schedule; only their interleaving order changes. (For
+an independent loop this "same bytes" property is a consequence of independence,
+but in this trace model it is part of how a schedule change is represented.)
+
+**Formal.** `Permutation Ts Ts'`.
+
+### C3 — Every iteration only reads and writes memory (no allocation or free)
+
+**Natural language.** Each iteration's trace consists solely of `Read` and `Write`
+events — no `Alloc` and no `Free`. This is what "write-only trace" means here
+(reads are allowed; the name refers to the *effect* alphabet excluding
+alloc/free). Loop bodies that allocate or free memory during the loop are outside
+these theorems.
+
+**Formal.**
+
+```coq
+Definition wr_only_event (ev: mem_event) : Prop :=      (* EvElimFrame.v *)
+  match ev with Write _ _ _ => True | Read _ _ _ _ => True | _ => False end.
+Definition wr_only_trace (T: list mem_event) : Prop := Forall wr_only_event T.
+Definition all_wr_only (Ts: list (list mem_event)) : Prop := Forall wr_only_trace Ts.
+```
+
+Hypothesis: `all_wr_only Ts`.
+
+### C4 — Iterations are independent (Bernstein), with footprints read off the traces
+
+**Natural language.** Distinct iterations must not conflict: no two distinct
+iterations write a common location, and no iteration reads a location that another
+iteration writes. Overlapping *read-only* accesses are allowed. Crucially, the
+per-iteration read/write footprints are taken **directly from the traces**
+(`trace_write_foot`/`trace_read_foot` = the write/read sets of that iteration's
+trace), so **every** access — including reads and writes of per-thread *private*
+variables — is counted and cannot be omitted. A location `(b,ofs)` is *written* by
+a trace if some `Write` event covers it, and *read* if some `Read` event covers
+it.
+
+**Formal.** The class predicate at the trace-derived footprints:
+
+```coq
+(* footprints read off the actual traces (SourceToTrace.v) *)
+Definition trace_iters (Ts) : Z -> Prop := fun z => 0 <= z < Z.of_nat (length Ts).
+Definition trace_at (Ts) (z:Z) : list mem_event := nth (Z.to_nat z) Ts nil.
+Definition trace_write_foot (Ts) (z:Z) : footprint := fun b ofs => writes (trace_at Ts z) b ofs.
+Definition trace_read_foot  (Ts) (z:Z) : footprint := fun b ofs => reads  (trace_at Ts z) b ofs.
+
+(* write/read of a location by a trace (HardenedConfluence.v / EvElimFrame.v) *)
+Definition written_by (b:block) (ofs:Z) (ev:mem_event) : Prop :=
+  match ev with Write b' ofs' bytes => b = b' /\ ofs' <= ofs < ofs' + Z.of_nat (length bytes)
+              | _ => False end.
+Definition read_by (b:block) (ofs:Z) (ev:mem_event) : Prop :=
+  match ev with Read b' ofs' n _ => b = b' /\ ofs' <= ofs < ofs' + n | _ => False end.
+Definition writes (T) (b) (ofs) : Prop := Exists (written_by b ofs) T.
+Definition reads  (T) (b) (ofs) : Prop := Exists (read_by  b ofs) T.
+
+(* the class condition (ClassPredicates.v) *)
+Definition foot_disjoint (f g: footprint) : Prop :=
+  forall b ofs, f b ofs -> g b ofs -> False.
+Record disjoint_write_class (iters: Z -> Prop) (write_foot read_foot: Z -> footprint) : Prop :=
+{ dw_write_disjoint :
+    forall i j, iters i -> iters j -> i <> j -> foot_disjoint (write_foot i) (write_foot j);
+  dw_read_write_disjoint :
+    forall i j, iters i -> iters j -> i <> j -> foot_disjoint (read_foot i) (write_foot j) }.
+```
+
+Hypothesis: `disjoint_write_class (trace_iters Ts) (trace_write_foot Ts) (trace_read_foot Ts)`.
+
+By `class_eq_traces_indep` this is **equivalent** to the trace-level Bernstein
+condition, so it can be read instead as: for all distinct iterations `i ≠ j`, no
+write/write overlap and no read/write overlap between `Ts[i]` and `Ts[j]`.
+
+### C5 — Both schedules start from the same initial memory
+
+**Natural language.** The two runs being compared begin in the *same* starting
+memory `m`. The guarantee is about the effect of the loop from a common
+pre-state.
+
+**Formal.** The shared `m` in `raw_run Ts m m1` and `raw_run Ts' m m2`.
+
+### C6 — What is guaranteed: equal final memory *contents* at every location
+
+**Natural language.** The conclusion is that the two results `m1` and `m2` have
+**identical byte contents at every memory location** `(b, ofs)`. The observable
+notion is final memory contents (`mem_contents`); the theorem does not assert
+equality of permission maps, `nextblock`, or any thread-local leftover state, and
+it is quantified over all locations, so in particular it covers the loop's entire
+output footprint.
+
+**Formal.**
+
+```coq
+forall b ofs, ZMap.get ofs (Mem.mem_contents m1) !! b
+            = ZMap.get ofs (Mem.mem_contents m2) !! b
+```
+
+### Summary
+
+A loop is certified schedule-independent by `class_schedule_independent` exactly
+when it is modelled as a list of per-iteration read/write-only traces (C1, C3),
+schedule changes are reorderings of those traces (C2), the iterations are
+Bernstein-independent with footprints taken from the traces (C4), and runs are
+compared from a common initial memory (C5); the guarantee is bytewise-equal final
+memory (C6). Conditions C2 and C1 encode the modelling of an OpenMP `for` as a
+permutable list of iteration traces; connecting this trace model to full `Ostep`
+runs of an actual `#pragma omp for` is the remaining modelling assumption
+discussed under *Building* and *Repository layout*. The race-agnostic variant
+`schedule_independent_or_race` drops C4 and instead concludes *either* C6 *or* an
+explicit conflicting pair (`list_conflict Ts`).
 
 ## Why this is faithful to OpenMP
 
