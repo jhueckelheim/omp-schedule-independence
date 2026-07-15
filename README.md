@@ -22,14 +22,27 @@ level of observable memory, plus the algebraic core of a third:
   memory unchanged, for every schedule (the schedule drives `Ostep`) and every
   thread count (chosen in `step_parallel`).
 
-- **C1 — disjoint-write bodies** (iteration `i` writes only within footprint
-  `W(i)`; the `W(i)` are pairwise disjoint; overlapping *reads* are allowed).
+- **C1 — independent iterations** (often abbreviated "disjoint-write", but the
+  condition is stronger). Distinct iterations must have **disjoint write sets**
+  *and* **no iteration may read a location that another iteration writes**;
+  overlapping *read-only* accesses are allowed. These are exactly the Bernstein
+  conditions for independence, captured by `disjoint_write_class` in
+  [`src/ClassPredicates.v`](src/ClassPredicates.v) via its two fields
+  `dw_write_disjoint` (no cross-iteration write/write overlap) and
+  `dw_read_write_disjoint` (no cross-iteration read/write overlap).
   `run_permutation_agree` ([`src/Confluence.v`](src/Confluence.v)) — modelling the
   loop as per-iteration write-only event traces confined to pairwise-disjoint
   footprints, **any two orders of the iterations (any permutation — i.e. any
   schedule / thread count) agree on the observable output**. This is the genuine
   "same result regardless of interleaving" theorem; its core is a
   commutation/diamond argument on memory writes.
+
+  Disjoint *writes alone* would not suffice — a read-after-write across iterations
+  is order-sensitive. That case is excluded twice over: by
+  `dw_read_write_disjoint`, and structurally by the proof, which represents each
+  iteration as a **fixed** byte-trace and relies on it computing the same bytes
+  regardless of when other iterations run — valid precisely because an
+  iteration's reads are never touched by another iteration's writes.
 
 - **C3 — associative-commutative reductions** (algebraic core).
   `reduce_workloads_thread_count_independent` ([`src/Reduction.v`](src/Reduction.v))
@@ -51,15 +64,58 @@ against the source; see [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PL
   is just one concrete `ChunkSplit`).
 
 - **Private variables are real per-thread copies.** Privatization allocates a
-  **fresh memory block** per privatized identifier (`Mem.alloc`) and rewrites the
-  thread's local environment, restoring/freeing at construct exit. `firstprivate`
-  is a deterministic initializer. This justifies the disjointness assumptions of
-  the C1/C2 classes.
+  **fresh memory block** per privatized identifier (`Mem.alloc`, which returns a
+  block at the monotonically increasing `nextblock`, distinct from every block
+  ever allocated) and rewrites the thread's local environment, restoring/freeing
+  at construct exit. `firstprivate` is a deterministic initializer.
 
-Out of scope, by design: `lastprivate` and `omp_get_thread_num` are not modelled
-by ClightOMP (so thread-id branching is not expressible in the verified fragment);
-the classes forbid external calls to keep the axiomatized externals off the proof
-path.
+### Private variables, reads-after-writes, and synchronization
+
+Three questions come up naturally; the answers determine exactly what is and is
+not covered.
+
+- **Reads of another iteration's writes.** A loop where iteration `i` reads a
+  location that iteration `j` writes *is* schedule-dependent, and is **not**
+  covered by C1: `dw_read_write_disjoint` forbids it. "Disjoint writes" is a
+  deliberate shorthand for the full independence (Bernstein) condition — see the
+  C1 description above.
+
+- **Private variables overwritten before use.** A `private` variable written
+  before it is read in each iteration produces accesses that overlap *at the
+  source-identifier level* across iterations, but **not at the memory level**:
+  privatization gives each thread's copy a freshly allocated, mutually distinct
+  block. Because the copy is written before being read, its incoming (undefined)
+  value is never observed, so the private carries **no cross-iteration
+  dependency** and cannot affect the observable shared result — regardless of
+  schedule or thread count. This is handled correctly by the semantics' fresh-
+  block allocation. Note the current C1 mechanization reasons about the *shared*
+  footprint only; private blocks are outside it by construction (freshness), so
+  they need no extra hypothesis. A dedicated write-before-read predicate (class
+  C2) that discharges this from the program text is future work (see
+  [`docs/CLASS_EXTENSION_PLAN.md`](docs/CLASS_EXTENSION_PLAN.md)). A private read
+  *before* any write would observe the fresh block's undefined initial contents —
+  per-iteration-local and deterministic, but a use-of-uninitialized issue
+  orthogonal to schedule-dependence, so the write-before-read condition is what
+  makes the private a genuine scratchpad.
+
+- **Atomics, locks, and other synchronization.** These are deliberately **out of
+  scope**, and correctly so: synchronization is exactly what lets one build
+  schedule-dependent (yet data-race-free) outcomes. In ClightOMP, locks are a
+  *separate* machine step (`syncStep`/`ext_step`), not a thread-internal
+  `dry_step`. The C0 theorem excludes them by an explicit hypothesis ruling out
+  `syncStep` (and `start_thread`/`pragmaStep`); the C1 model excludes them
+  structurally, since a lock acquire/release is a `sync_event` and an atomic
+  read-modify-write is not expressible as the plain write-only memory-event trace
+  that C1 quantifies over. OpenMP `atomic`/`critical`/explicit locks are not part
+  of the modelled loop-body fragment at all. The *sanctioned* way to have many
+  iterations update shared state is a **reduction**, handled separately (C3,
+  [`src/Reduction.v`](src/Reduction.v)) via associativity/commutativity of the
+  combiner — a naive shared `+=` would be a write/write overlap that C1 forbids.
+
+Also out of scope, by design: `lastprivate` and `omp_get_thread_num` are not
+modelled by ClightOMP (so thread-id branching is not expressible in the verified
+fragment); the classes forbid external calls to keep the axiomatized externals off
+the proof path.
 
 ## Repository layout
 
