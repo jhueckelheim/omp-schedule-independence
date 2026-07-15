@@ -85,9 +85,21 @@ Build all with `sh sched_indep/build.sh`. Status of each file:
                         index argument); framing makes all other iterations invisible there; the
                         owner determines the value base-independently. Depends only on classical
                         logic (`classic`, for owner-uniqueness); no `Admitted`, no framework axioms.
+- `HardenedConfluence.v` — **RACE-AGNOSTIC hardening.** Independence is now read off the ACTUAL
+                        traces (`writes`/`reads` extracted from the events), is decidable/total
+                        (`indep_or_conflict`), and is the exact hypothesis of the guarantee.
+                        `schedule_independent_or_race`: for ANY write-only trace list (race-free or
+                        not) and any two orders, EITHER the two runs agree everywhere OR an explicit
+                        conflicting pair is produced (a race witness). Independence transports across
+                        the reordering via the permutation's positional bijection
+                        (`traces_indep_perm`, from `Permutation_nth`), and the content at each
+                        location is characterised canonically (`raw_run_content_char`). Depends only
+                        on `classic`; no `Admitted`, no framework axioms.
 
-STATUS: C0 (pure, T0) and C1 (disjoint-write, T1) are both machine-checked. C3's algebraic core
-(`Reduction.v`) and thread-count independence (`ChunkIndep.v`, L5) are done and compose with C1.
+STATUS: C0 (pure, T0) and C1 (disjoint-write, T1) are machine-checked, and the C1 result is
+additionally available in a RACE-AGNOSTIC form (`HardenedConfluence.v`) whose independence
+hypothesis is derived from the traces and comes with a race witness on the negative side. C3's
+algebraic core (`Reduction.v`) and thread-count independence (`ChunkIndep.v`, L5) compose with C1.
 
 Remaining to reach a single end-to-end `Ostep`-level C1 theorem (optional hardening): connect the
 `ev_elim`-level `run` model to actual `Ostep` runs by showing each iteration's `dry_step` emits a

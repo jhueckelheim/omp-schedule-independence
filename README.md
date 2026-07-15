@@ -49,6 +49,28 @@ level of observable memory, plus the algebraic core of a third:
   — an AC reduction over the loop's chunks is invariant under the thread-count and
   work split, via the `ChunkSplit` permutation invariant.
 
+### A guarantee that holds even for possibly-racy programs
+
+The theorems above assume independence as a hypothesis. The **hardened** result
+([`src/HardenedConfluence.v`](src/HardenedConfluence.v)) removes that assumption
+and applies to an *arbitrary* program:
+
+- `schedule_independent_or_race` — for any list of per-iteration memory-event
+  traces and any two orders (permutations) of it, **either** the two runs agree
+  at every memory location (schedule-independent output) **or** the traces
+  exhibit an explicit conflicting pair — two distinct iterations, one writing a
+  location the other reads or writes (a witnessed potential data race).
+
+Crucially, the independence condition is **read off the actual execution traces**
+(their write and read sets), not assumed about the source, and it is total
+(`indep_or_conflict`: any trace list is either independent or has a witnessed
+conflict). So the guarantee is never *claimed* for a racy program — on such input
+the independence disjunct simply does not hold and a concrete race witness is
+returned. `raw_run_permutation_agree` is the independent-case guarantee; it uses a
+canonical-value characterisation (`raw_run_content_char`) and transports
+independence across the reordering via the permutation's positional bijection
+(`traces_indep_perm`).
+
 ## Why this is faithful to OpenMP
 
 Two properties of the ClightOMP semantics make these results meaningful (verified
@@ -144,7 +166,8 @@ build.sh                a build driver (see below)
 | [`src/Diamond.v`](src/Diamond.v) | disjoint `storebytes` commute up to `mem_equiv` (C1 memory core) |
 | [`src/EvElimFrame.v`](src/EvElimFrame.v) | write-only trace frame + base-independence |
 | [`src/StepDiamond.v`](src/StepDiamond.v) | **C1 observable diamond** |
-| [`src/Confluence.v`](src/Confluence.v) | **C1 permutation-invariance theorem** |
+| [`src/Confluence.v`](src/Confluence.v) | **C1 permutation-invariance theorem** (independence assumed) |
+| [`src/HardenedConfluence.v`](src/HardenedConfluence.v) | **race-agnostic theorem**: independence (read off the traces) ⇒ schedule-independent, else explicit race witness |
 
 ## Axiom hygiene
 
@@ -157,8 +180,10 @@ Every headline theorem was checked with `Print Assumptions`:
   `OstepFraming.v`, `OstepRun.v`) inherit the standard CompCert/VST base axioms
   (classical logic, functional extensionality, `inline_external_call_mem_events`)
   transitively via `restrPermMap`.
-- `Confluence.v` additionally uses classical logic (`classic`) only for the
-  owner-uniqueness argument.
+- `Confluence.v` and `HardenedConfluence.v` additionally use classical logic
+  (`classic`) only — for owner-uniqueness and for the totality of the
+  independent-or-conflict disjunction. `schedule_independent_or_race` and
+  `raw_run_permutation_agree` depend on `classic` and nothing else.
 
 No `Admitted`, and no axioms introduced by this development.
 
