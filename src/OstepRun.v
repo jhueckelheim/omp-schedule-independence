@@ -1,5 +1,5 @@
-(* Schedule-independence development, step 7: multi-step lift (theorem T0 for a
-   whole run).
+(* Pure class, whole run: schedule-independence of a pure-body loop over a full
+   multi-step Ostep run.
 
    Ostep_refl_trans_closure (HybridMachine.v:1047) is clos_refl_trans_1n over
    Ostep. We show that a run in which every step preserves observable memory
@@ -10,7 +10,7 @@
 
    Because Ostep is driven by the schedule (the head of U), and the run lemma
    quantifies over ALL runs (hence all schedules and, via step_parallel's choice
-   of num_threads, all thread counts), this is theorem T0: the pure class is
+   of num_threads, all thread counts), the pure class is
    schedule- and thread-count-independent at the level of observable memory.
 
    Build (upstream untouched), from the ClightOMP root:
@@ -49,7 +49,7 @@ Section OstepRun.
 
   (* Any preserving step is in particular an Ostep. *)
 
-  (* MAIN (T0, multi-step): a whole preserving run leaves observable contents
+  (* MAIN (multi-step): a whole preserving run leaves observable contents
      unchanged from start to finish. Proof by induction on the closure, chaining
      the per-step guarantees with transitivity of obs_equiv. *)
   Theorem preserving_run_obs_equiv :
@@ -131,7 +131,7 @@ Section OstepRun.
       apply pure_ostep_preserving; assumption.
   Qed.
 
-  (* HEADLINE (T0): a pure-class run -- built from raw Ostep steps, each out of a
+  (* HEADLINE: a pure-class run -- built from raw Ostep steps, each out of a
      pure state -- leaves the observable output unchanged, for EVERY schedule
      (the schedule is the head of U, quantified over by "for all runs") and every
      thread count. The pure class is schedule- and thread-count-independent. *)

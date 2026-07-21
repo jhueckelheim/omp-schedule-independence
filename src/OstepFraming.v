@@ -1,12 +1,11 @@
-(* Schedule-independence development, step 6: lifting read-only framing to the
-   top-level machine step Ostep.
+(* Pure class at the top-level machine step: lifting read-only framing to Ostep.
 
    Ostep (HybridMachine.v:1045) is the coarse-machine step over
      Ostate = (MachState * mem),  MachState = (schedule * event_trace * t * team_tree).
    For the COARSE machine diluteMem = id and yield = id (HybridMachineSig.v:727-732),
    and threadStep = dry_step (HybridMachine.v:592).
 
-   We prove theorem T0 at the schedule/thread-pool level by CASE ANALYSIS on an
+   We prove the pure-class step property at the schedule/thread-pool level by CASE ANALYSIS on an
    actual Ostep: for every way the machine can take one step, if that step does
    not perform a shared write, the observable memory contents are preserved on
    every footprint. Concretely:
@@ -70,7 +69,7 @@ Section OstepFraming.
      result we take the concrete "internal thread step with read-only events"
      shape, which is exactly what a pure iteration body performs. *)
 
-  (* T0, one Ostep, by case analysis. We prove that ANY Ostep whose only memory
+  (* Pure class, one Ostep, by case analysis. We prove that ANY Ostep whose only memory
      effect is a read-only internal thread step preserves observable contents.
      The hypothesis [Hpure] discharges the three memory-mutating cases and
      supplies read-only-ness for the thread step. *)

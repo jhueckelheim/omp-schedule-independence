@@ -177,7 +177,7 @@ opam exec --switch=ClightOMP -- coqc $(cat _CoqProject) \
 ```
 src/           the Coq proof files
 examples/      the motivating C example (out[i] = f(i))
-docs/          design notes and the full class/boundary discussion
+docs/          DYNAMIC_ASSERTIONS.md — checking the preconditions at runtime
 build.sh       build driver (takes a path to a built ClightOMP checkout)
 ```
 

@@ -1,5 +1,5 @@
-(* Schedule-independence development, step 4: the first Ostep-adjacent lemma
-   (memory-level foundation of theorem T0, the pure class).
+(* Memory-level foundation of the pure class: a read-only event/step preserves
+   memory, so a pure iteration's execution is invisible to other iterations.
 
    A "pure" loop body performs no shared writes. At the level of the memory
    event trace that drives execution (event_semantics.v), purity means the trace
@@ -63,7 +63,7 @@ Section StepFraming.
 
   (* 2. Hence a read-only trace yields obs_equiv on EVERY footprint: the
         observable output is identical to the starting memory. This is the
-        memory-level core of T0 (pure class): a pure iteration's step does not
+        memory-level core of the pure class: a pure iteration's step does not
         change what any observer -- or any other iteration -- sees. *)
 
 

@@ -1,5 +1,5 @@
-(* Schedule-independence development, step 5: lifting read-only framing through
-   a single thread step (dry_step).
+(* Pure class at the thread-step layer: lifting read-only framing through a single
+   thread step (dry_step).
 
    dry_step (HybridMachine.v:158) is the thread-local Clight execution step of
    the machine. In its only constructor step_dry we have
@@ -10,7 +10,7 @@
    observable CONTENTS of m' equal those of m. Hence a read-only dry_step
    preserves obs_equiv on every footprint.
 
-   This is the thread-step-level statement of the pure class (theorem T0): a
+   This is the thread-step-level statement of the pure class: a
    pure iteration executed by any thread does not change the memory contents
    that other iterations observe, so interleaving order is irrelevant.
 

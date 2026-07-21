@@ -1,16 +1,13 @@
-(* Schedule-independence development, step 3 (C3 algebraic core).
+(* Associative-commutative reductions: order-independence.
 
    The result of an associative-commutative reduction does not depend on the
    order in which per-thread / per-chunk partial results are combined. Since a
    ChunkSplit's team_workloads is a permutation of the loop's chunks
    (ChunkIndep.chunksplit_thread_count_independent), an AC reduction over the
-   chunks is therefore independent of thread count and schedule.
+   chunks is therefore independent of thread count and schedule. A pure
+   list-algebra fact (no machine step relation).
 
-   This is a pure list-algebra fact (no machine step relation). It is the
-   foundation of theorem T3 in CLASS_EXTENSION_PLAN.md.
-
-   Build (upstream untouched), from the ClightOMP root:
-     eval $(opam env --switch=ClightOMP)
+   Build (from a built ClightOMP checkout):
      coqc $(cat _CoqProject) -Q sched_indep VST.concurrency.openmp_sem.sched_indep \
           sched_indep/Reduction.v
 *)

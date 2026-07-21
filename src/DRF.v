@@ -36,7 +36,7 @@
    lastprivate, a private variable read before written such as a per-thread
    counter): there, S1 gives every iteration its own thread, so per-thread state
    never aliases across iterations and S1 HIDES exactly those races. Such
-   constructs are outside the modelled fragment (see README / CLASS_EXTENSION_PLAN).
+   constructs are outside the modelled fragment (see README).
 
    Build (from a built ClightOMP checkout):
      coqc $(cat _CoqProject) -Q sched_indep VST.concurrency.openmp_sem.sched_indep \

@@ -1,15 +1,9 @@
-(* Schedule-independence development: HARDENING.
+(* Schedule-independence, race-agnostic form.
 
-   The theorems in Confluence.v assume the caller supplies pairwise-disjoint
-   footprints. A skeptic asks: what if the program actually has a data race that
-   was not ruled out? This file answers that by making the independence condition
-
-     (a) DERIVED FROM THE ACTUAL EXECUTION TRACES (not assumed about the source),
-     (b) DECIDABLE, and
-     (c) the exact hypothesis of the schedule-independence guarantee,
-
-   and then proving a theorem that is valid for an ARBITRARY program, race-free
-   or not:
+   The independence condition is DERIVED FROM THE ACTUAL EXECUTION TRACES (not
+   assumed about the source) and is the exact hypothesis of the schedule-
+   independence guarantee. This file proves a theorem valid for an ARBITRARY
+   program, race-free or not:
 
      for any list of per-iteration memory-event traces, EITHER the traces are
      independent -- in which case every schedule yields the same observable

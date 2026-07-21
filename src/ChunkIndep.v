@@ -1,8 +1,8 @@
-(* Schedule-independence development, step 1.
+(* Thread-count independence at the chunk level.
 
    This file exercises the ClightOMP machinery without any confluence work.
    It proves a real structural building block behind THREAD-COUNT INDEPENDENCE
-   (plan L5): any ChunkSplit of a loop -- regardless of how many threads it uses
+   any ChunkSplit of a loop -- regardless of how many threads it uses
    or how it assigns work -- distributes exactly the same multiset of iteration
    chunks. Two ChunkSplits of the same loop therefore cover the same chunks.
 

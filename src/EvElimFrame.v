@@ -1,4 +1,4 @@
-(* Schedule-independence development, step 9: the ev_elim frame lemma.
+(* The ev_elim frame and base-independence lemmas.
 
    An event trace built from Read/Write/Alloc/Free (i.e. everything the Clight
    event semantics can emit, INCLUDING iteration-local allocation and free from
