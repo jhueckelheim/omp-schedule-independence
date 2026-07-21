@@ -44,6 +44,29 @@ independent at the source level but secretly depends on the schedule (for
 example, a private per-thread iteration counter written into the output) is
 correctly rejected, not certified.
 
+### Data-race-freedom of the 1:1 schedule as an oracle
+
+A separate, complementary result ([`src/DRF.v`](src/DRF.v)) is about *preserving
+data-race-freedom* across schedules rather than about results. Model a schedule as
+an assignment of iterations to threads; two distinct iterations may race only if
+they are placed on different threads and their traces conflict. The
+**maximally-parallel schedule `S1`** maps iteration `i` to thread `i` (as many
+threads as iterations, 1:1), so it makes *every* pair of iterations concurrent.
+
+- `drf_S1_implies_all_drf` — if the loop is data-race-free under `S1`, it is
+  data-race-free under **every** schedule and thread count. So the single 1:1
+  schedule is a sound oracle for data-race-freedom.
+- `drf_S1_iff_no_conflict` — `S1` is data-race-free exactly when no pair of
+  iterations conflicts, and `drf_S1_iff_traces_indep` — this coincides with the
+  independence condition above.
+
+This holds in the same fragment (fixed per-iteration footprints: no
+synchronization, no per-thread state carried across iterations). It is **not** a
+sound oracle outside that fragment — for a program with per-thread state (a
+private counter, `threadprivate`, `lastprivate`), `S1` gives each iteration its
+own thread and therefore *hides* exactly the races that reusing threads would
+expose. Such constructs are outside the modelled fragment.
+
 ## Preconditions a loop must satisfy
 
 A loop is certified schedule-independent when all of the following hold. They are
