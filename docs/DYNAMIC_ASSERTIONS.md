@@ -196,6 +196,26 @@ stated over the *observed* per-iteration footprints:
   the assertions give a strong, cheap dynamic guarantee and a precise witness on
   failure.
 
+## Exempt locations widen the accepted class (extended oracle)
+
+`src/DRFExtended.v` generalizes the 1:1 oracle to ignore conflicts at a set of
+**exempt** locations, keeping the "1:1 ⇒ all schedules" guarantee. For the
+instrumentation this means two accesses can be *skipped* by the conflict check:
+
+- **Reduction variables.** Locations updated only through an associative-
+  commutative combiner (a reduction: `sum += a[i]`, `atomicAdd(&h[k], 1)`) are
+  exempt — do not emit `OMP_SI_WRITE` for them, or mark them exempt. Their
+  overlaps are not races because the reduced value is order-independent
+  (`Reduction.v`). The check then flags only *non-reduction* conflicts.
+- **Per-iteration scratch memory.** Memory allocated (and freed) inside one
+  iteration is at a fresh block private to that iteration; do not instrument
+  accesses to it. Only pre-existing (shared) memory needs tracking. This is the
+  `fresh_drf_ex_sound` result: exempting non-pre-existing blocks loses nothing.
+
+With nothing exempted this reduces to the plain check, so it is a safe default to
+turn exemptions on only for declared reduction variables and known iteration-local
+allocations.
+
 ## Caveats and limits
 
 - **Input coverage.** Dynamic checks certify the observed run only. They are a

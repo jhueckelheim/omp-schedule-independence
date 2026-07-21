@@ -67,6 +67,26 @@ private counter, `threadprivate`, `lastprivate`), `S1` gives each iteration its
 own thread and therefore *hides* exactly the races that reusing threads would
 expose. Such constructs are outside the modelled fragment.
 
+**Extended oracle with exempt locations** ([`src/DRFExtended.v`](src/DRFExtended.v)).
+The oracle is generalized to ignore conflicts at a caller-supplied set of *exempt*
+locations, widening the class of loops it accepts while keeping the same
+"1:1 ⇒ all schedules" guarantee (`drf_ex_S1_implies_all_drf`). Two exemptions are
+proved sound:
+
+- **Associative-commutative reductions.** Locations updated only through an AC
+  combiner (sum, max, histogram bump) may be exempted: their write/write overlaps
+  are not genuine races because the reduced value is order-independent
+  (`Reduction.v`). `reduction_pure_all_drf` shows a pure-reduction loop has no
+  surviving conflict on any schedule.
+- **Per-iteration fresh allocations.** Scratch memory allocated and freed inside
+  one iteration lives at a fresh block, private to that iteration, so it can never
+  be a cross-iteration conflict. `fresh_drf_ex_sound` proves that (under the
+  freshness fact) exempting non-pre-existing blocks loses nothing — the oracle
+  then certifies data-race-freedom of the shared, pre-existing memory only.
+
+With no exemptions the extended oracle coincides with the plain one
+(`drf_ex_no_exempt_is_drf`), so it is a strict generalization.
+
 ## Preconditions a loop must satisfy
 
 A loop is certified schedule-independent when all of the following hold. They are
