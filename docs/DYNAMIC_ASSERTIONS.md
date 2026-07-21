@@ -42,35 +42,36 @@ do that with computable expressions.
 
 ## Which assertions each class needs
 
-The individual checks are defined in the sections below; this table says which are
-**required**, which are **optional/free**, and which are only a **syntactic side
-condition** for each of the two guarantees.
+It helps to separate the abstract **precondition** (what must be true) from the
+**assertion you actually add** (what you write or enable to check it). Both classes
+share the footprint-disjointness *precondition*, but they check it by different
+means, and for the DRF oracle it costs no added assertion at all.
 
-| Check (defined below) | Schedule-independence (`class_schedule_independent`) | 1:1 DRF oracle (`drf_S1_*`) |
+| Precondition | Schedule-independence — what you add | 1:1 DRF oracle — what you add |
 |---|---|---|
-| **A/B. Footprint disjointness** (`W(i)∩W(j)=∅` and `R(i)∩W(j)=∅`) | **required** | **required** |
-| **1. No synchronization / no thread-id / no external calls** (syntactic scan) | **required** | **required** |
-| **2. Write-before-read for privates** (per-iteration init flag) | **not needed** (footprints are read off real traces, so a private read is counted like any access and shows up in check A/B) | **required** (otherwise the 1:1 schedule *hides* per-thread-state races) |
-| **3. Fixed trip count** | not needed for the statement, but assumed in practice | **required** (the 1:1 mapping `num_threads = trip_count` must be well-defined) |
+| Footprint disjointness (`W(i)∩W(j)=∅`, `R(i)∩W(j)=∅`) | **Option A** shadow-map assertions | **nothing extra** — the disjointness check *is* the 1:1 race-detector run (Option B); an overlapping write shows up as a reported data race |
+| No sync / no thread-id / no external calls | **#1** syntactic scan | **#1** syntactic scan |
+| Write-before-read for privates | not needed (private accesses are already in `R(i)`/`W(i)`, so a hazardous private surfaces as a conflict in Option A) | **#2** per-iteration init flag (otherwise the 1:1 schedule *hides* per-thread-state races) |
+| Fixed trip count | not assumed by the statement | **#3** (the 1:1 mapping `num_threads = trip_count` must be well-defined) |
 
-Reading of the table:
+The key point about the oracle: **footprint disjointness is a precondition of the
+oracle, but it is not a separate assertion you write.** Running at
+`num_threads = trip_count` under a data-race detector (Option B) makes every pair
+of iterations concurrent, so any write/write or read/write overlap is, by
+definition, a reported data race — that report *is* the disjointness check.
+(Read/read overlap is not a race and is correctly not reported, matching the
+Bernstein condition that overlapping reads are allowed.) Option A is the
+*alternative* way to check the same disjointness precondition when you are not
+using a detector — it is the route for schedule-independence, and it is also
+available for the oracle if you prefer explicit assertions over a sanitizer.
 
-- **Both classes** need the footprint-disjointness check (A or B) and the
-  syntactic no-synchronization/no-externals side condition.
-- **Only the DRF oracle** additionally needs the write-before-read private check
-  (#2) and the fixed-trip-count check (#3). These are exactly the conditions that
-  make the 1:1 schedule a *sound* oracle: without #2 it would certify a
-  per-thread-counter loop that is actually schedule-dependent; without #3 the
-  schedule "one iteration per thread" is not even defined.
-- **Schedule-independence does not need #2**: because its footprints are taken
-  from the actual traces, a private variable's reads and writes are already
-  present in `R(i)`/`W(i)`, so a hazardous private (e.g. a counter read before
-  write) surfaces directly as a conflict in check A/B. It needs #3 only in the
-  informal sense that a data-dependent trip count is unusual; the theorem itself
-  does not assume it.
+So, concretely:
 
-So: to certify **schedule-independence**, enable checks **A/B and #1**. To use the
-**1:1 DRF oracle**, enable checks **A/B, #1, #2, and #3**.
+- **Schedule-independence:** add **Option A** assertions + the **#1** scan.
+- **1:1 DRF oracle:** run under a data-race detector with `num_threads = trip
+  count` (**Option B**, which needs no added disjointness assertion) + the **#1**
+  scan + the **#2** write-before-read check + the **#3** fixed-trip-count check.
+  (If you cannot use a detector, substitute Option A for the disjointness part.)
 
 ## The instrumentation primitives
 
@@ -92,13 +93,15 @@ A write is then written as `OMP_SI_WRITE(a[i]); a[i] = expr;` and a read as
 `OMP_SI_READ(a[k]); use(a[k]);`. (A source-to-source pass, or a compiler plugin,
 can insert these automatically; by hand they go at each access.)
 
-## Checking the disjointness conditions  — *required by BOTH classes*
+## Checking the disjointness conditions  — *a precondition of BOTH classes*
 
 The pairwise conditions `W(i) ∩ W(j) = ∅` and `R(i) ∩ W(j) = ∅` are exactly the
-Bernstein independence conditions. Two equivalent runtime realisations (either one
-suffices, and either serves both classes):
+Bernstein independence conditions, and are a precondition of both classes. There
+are two ways to check them; **you need only one**. For the 1:1 DRF oracle, Option
+B is the natural choice and adds *no* explicit assertion (the race detector is the
+check); for schedule-independence, use Option A.
 
-### Option A — global "owner" map (direct, O(footprint) memory)
+### Option A — global "owner" map, explicit assertions (used for schedule-independence)
 
 Keep two arrays indexed by byte address (conceptually; in practice a hash map):
 `writer[addr]` = the iteration that last wrote `addr`, and check on every access.
@@ -128,7 +131,7 @@ compare-and-set, OR the loop is run **sequentially in index order** purely for
 checking (which is sound: it observes the same per-iteration footprints, since the
 class forbids the schedule from changing them).
 
-### Option B — the 1:1-schedule connection (per the DRF result)
+### Option B — 1:1 run under a data-race detector, no added assertion (the DRF oracle)
 
 `src/DRF.v` says the 1:1 schedule exposes every pair as concurrent, so a
 thread-sanitizer-style race detector run under "one iteration per thread" reports
