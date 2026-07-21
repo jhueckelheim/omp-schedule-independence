@@ -40,6 +40,38 @@ So the whole prerequisite reduces to: **record `R(i)` and `W(i)` per iteration,
 and check the two pairwise-disjointness conditions.** Everything below is a way to
 do that with computable expressions.
 
+## Which assertions each class needs
+
+The individual checks are defined in the sections below; this table says which are
+**required**, which are **optional/free**, and which are only a **syntactic side
+condition** for each of the two guarantees.
+
+| Check (defined below) | Schedule-independence (`class_schedule_independent`) | 1:1 DRF oracle (`drf_S1_*`) |
+|---|---|---|
+| **A/B. Footprint disjointness** (`W(i)∩W(j)=∅` and `R(i)∩W(j)=∅`) | **required** | **required** |
+| **1. No synchronization / no thread-id / no external calls** (syntactic scan) | **required** | **required** |
+| **2. Write-before-read for privates** (per-iteration init flag) | **not needed** (footprints are read off real traces, so a private read is counted like any access and shows up in check A/B) | **required** (otherwise the 1:1 schedule *hides* per-thread-state races) |
+| **3. Fixed trip count** | not needed for the statement, but assumed in practice | **required** (the 1:1 mapping `num_threads = trip_count` must be well-defined) |
+
+Reading of the table:
+
+- **Both classes** need the footprint-disjointness check (A or B) and the
+  syntactic no-synchronization/no-externals side condition.
+- **Only the DRF oracle** additionally needs the write-before-read private check
+  (#2) and the fixed-trip-count check (#3). These are exactly the conditions that
+  make the 1:1 schedule a *sound* oracle: without #2 it would certify a
+  per-thread-counter loop that is actually schedule-dependent; without #3 the
+  schedule "one iteration per thread" is not even defined.
+- **Schedule-independence does not need #2**: because its footprints are taken
+  from the actual traces, a private variable's reads and writes are already
+  present in `R(i)`/`W(i)`, so a hazardous private (e.g. a counter read before
+  write) surfaces directly as a conflict in check A/B. It needs #3 only in the
+  informal sense that a data-dependent trip count is unusual; the theorem itself
+  does not assume it.
+
+So: to certify **schedule-independence**, enable checks **A/B and #1**. To use the
+**1:1 DRF oracle**, enable checks **A/B, #1, #2, and #3**.
+
 ## The instrumentation primitives
 
 Introduce two macros the programmer places at each shared memory access in the
@@ -60,10 +92,11 @@ A write is then written as `OMP_SI_WRITE(a[i]); a[i] = expr;` and a read as
 `OMP_SI_READ(a[k]); use(a[k]);`. (A source-to-source pass, or a compiler plugin,
 can insert these automatically; by hand they go at each access.)
 
-## Checking the disjointness conditions
+## Checking the disjointness conditions  — *required by BOTH classes*
 
 The pairwise conditions `W(i) ∩ W(j) = ∅` and `R(i) ∩ W(j) = ∅` are exactly the
-Bernstein independence conditions. Two equivalent runtime realisations:
+Bernstein independence conditions. Two equivalent runtime realisations (either one
+suffices, and either serves both classes):
 
 ### Option A — global "owner" map (direct, O(footprint) memory)
 
@@ -110,19 +143,21 @@ no source edits but requires the 1:1 thread count to be realisable.
 ## The extra conditions, as assertions
 
 Beyond footprint disjointness, a few structural prerequisites must also hold. Each
-maps to a checkable in-body assertion:
+is tagged with the class(es) that need it.
 
-1. **No cross-iteration synchronization / no thread-id dependence.** Assert the
-   loop body calls none of `omp_get_thread_num`, `omp_get_num_threads`, lock
-   acquire/release, `#pragma omp atomic/critical/ordered/barrier`. This is a
-   *syntactic* side condition, checkable by a one-pass scan of the body rather
-   than a runtime assertion; include it as a documented precondition and, if
-   desired, a compile-time check (`static_assert`-style or a linter rule).
+1. **No cross-iteration synchronization / no thread-id dependence.**
+   *— required by BOTH classes.* Assert the loop body calls none of
+   `omp_get_thread_num`, `omp_get_num_threads`, lock acquire/release,
+   `#pragma omp atomic/critical/ordered/barrier`. This is a *syntactic* side
+   condition, checkable by a one-pass scan of the body rather than a runtime
+   assertion; include it as a documented precondition and, if desired, a
+   compile-time check (`static_assert`-style or a linter rule).
 
-2. **No per-thread state carried across iterations (required by the DRF oracle,
-   automatic for schedule-independence).** A private variable is safe only if it
-   is *written before read* in each iteration. This is checkable in-body with a
-   per-iteration "initialized" shadow flag:
+2. **No per-thread state carried across iterations.**
+   *— required by the 1:1 DRF oracle only; NOT needed for schedule-independence.*
+   A private variable is safe only if it is *written before read* in each
+   iteration. This is checkable in-body with a per-iteration "initialized" shadow
+   flag:
 
    ```c
    // at entry to each iteration, mark all such privates uninitialized:
@@ -136,9 +171,11 @@ maps to a checkable in-body assertion:
    (`firstprivate` is exempt: it is initialised deterministically from the shared
    original, so treat it as pre-initialised.)
 
-3. **Fixed trip count.** For the 1:1 mapping to be well-defined the iteration
-   count must not depend on the schedule; assert the loop bound is evaluated once
-   before the region (`const int n = ...;` with `n` not written in the body).
+3. **Fixed trip count.**
+   *— required by the 1:1 DRF oracle only; not assumed by the schedule-independence
+   statement.* For the 1:1 mapping to be well-defined the iteration count must not
+   depend on the schedule; assert the loop bound is evaluated once before the
+   region (`const int n = ...;` with `n` not written in the body).
 
 ## Soundness of the reduction
 
