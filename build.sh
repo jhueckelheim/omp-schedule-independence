@@ -41,7 +41,7 @@ FLAGS="$(cat _CoqProject) -Q sched_indep VST.concurrency.openmp_sem.sched_indep"
 
 for f in ObsEquiv ClassPredicates ChunkIndep Reduction StepFraming \
          DryStepFraming OstepFraming OstepRun SetN EvElimFrame \
-         HardenedConfluence SourceToTrace DRF DRFExtended; do
+         HardenedConfluence SourceToTrace DRF DRFExtended PrivateOracle; do
   echo "COQC sched_indep/$f.v"
   $COQC $FLAGS "sched_indep/$f.v"
 done

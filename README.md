@@ -60,12 +60,21 @@ threads as iterations, 1:1), so it makes *every* pair of iterations concurrent.
   iterations conflicts, and `drf_S1_iff_traces_indep` — this coincides with the
   independence condition above.
 
-This holds in the same fragment (fixed per-iteration footprints: no
-synchronization, no per-thread state carried across iterations). It is **not** a
-sound oracle outside that fragment — for a program with per-thread state (a
-private counter, `threadprivate`, `lastprivate`), `S1` gives each iteration its
-own thread and therefore *hides* exactly the races that reusing threads would
-expose. Such constructs are outside the modelled fragment.
+`src/PrivateOracle.v` extends the oracle proof with the private-state side
+condition needed to avoid a false pass from the 1:1 run. It proves that checking
+for uninitialized reads in the 1:1 run is enough for every schedule
+(`oracle_1to1_safe_implies_all_schedules_safe`), that for plain `private` this is
+exactly the usual write-before-read condition
+(`all_private_oracle_is_write_before_read`), and that `firstprivate` needs no
+write-before-read check because its copy starts initialized
+(`firstprivate_needs_no_write_before_read_check`).
+
+This holds in the fixed-footprint fragment: no synchronization, no thread-id
+dependence, no external calls, fixed trip count, and no per-thread state except
+privates covered by the uninitialized-read check above. It is **not** a sound
+oracle for unchecked per-thread state such as `threadprivate` or `lastprivate`:
+`S1` gives each iteration its own thread and can hide reuse of thread-local state
+across iterations. Such constructs are outside the modelled fragment.
 
 **Extended oracle with exempt locations** ([`src/DRFExtended.v`](src/DRFExtended.v)).
 The oracle is generalized to ignore conflicts at a caller-supplied set of *exempt*
@@ -182,5 +191,7 @@ build.sh       build driver (takes a path to a built ClightOMP checkout)
 ```
 
 The main theorems live in `src/SourceToTrace.v` (independence ⇒
-schedule-independence) and `src/HardenedConfluence.v` (the race-agnostic form);
-the remaining files provide the supporting memory-level reasoning.
+schedule-independence), `src/HardenedConfluence.v` (the race-agnostic form),
+`src/DRF.v` / `src/DRFExtended.v` (the 1:1 race oracle), and
+`src/PrivateOracle.v` (the private/firstprivate uninitialized-read side
+condition); the remaining files provide the supporting memory-level reasoning.

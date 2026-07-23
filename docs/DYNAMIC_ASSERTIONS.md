@@ -25,29 +25,64 @@ Overlapping reads are allowed. Both guarantees rest on this condition:
 shows it is exactly "the 1:1 schedule has no conflicting pair," which is what makes
 that schedule a sound data-race oracle.
 
+## What is proved for the 1:1 oracle
+
+The oracle proof has two independent parts:
+
+- `drf_S1_implies_all_drf` (`src/DRF.v`): if the maximally parallel schedule
+  `S1` has no read/write or write/write race, then no schedule has such a race.
+  `S1` works because every distinct pair of iterations is concurrent there.
+- `oracle_1to1_safe_implies_all_schedules_safe` (`src/PrivateOracle.v`): combine
+  the shared-memory DRF oracle with a private-state check. If the 1:1 run has no
+  uninitialized read of a privatized value, then every schedule is safe with
+  respect to those private reads. For plain `private`, this check is equivalent
+  to write-before-read (`all_private_oracle_is_write_before_read`). For
+  `firstprivate`, it is vacuous at entry because the copy is already initialized
+  (`firstprivate_needs_no_write_before_read_check`).
+
+Therefore, to use the 1:1 oracle, the tool must establish both: no shared-memory
+race in the 1:1 run, and no read of an uninitialized private copy in that same
+run. The remaining assumptions below ensure that the trace checked by the oracle
+is the trace covered by the theorem.
+
 ## Which checks each guarantee needs
 
 | Precondition | Schedule-independence | 1:1 DRF oracle |
 |---|---|---|
 | Footprint disjointness (`W(i)∩W(j)=∅`, `R(i)∩W(j)=∅`) | Option A (shadow-map assertions) | Option B (1:1 run under a race detector) — no added assertion |
 | No synchronization / thread-id / external calls | required (syntactic scan) | required (syntactic scan) |
-| Write-before-read for privates | not needed | required |
+| Uninitialized reads of uninitialized privates | not needed | required |
 | Fixed trip count | not assumed | required |
 
 - **Schedule-independence:** Option A + the syntactic scan.
-- **1:1 DRF oracle:** Option B + the syntactic scan + the write-before-read check
+- **1:1 DRF oracle:** Option B + the syntactic scan + the uninitialized-private-read check
   + the fixed-trip-count check. (Substitute Option A for Option B if a race
   detector is unavailable.)
+
+For the 1:1 oracle, the tool responsibilities are:
+
+1. **Static analysis:** reject synchronization, thread-id queries, unsupported
+   external calls, `threadprivate`, and `lastprivate`.
+2. **Static analysis or assertion:** ensure the trip count is fixed before the
+   loop and not modified by the body.
+3. **1:1 race run or shadow assertions:** establish shared footprint
+   disjointness by checking that the 1:1 run has no non-exempt read/write or
+   write/write races.
+4. **Runtime assertion or definite-assignment analysis:** reject reads of
+   uninitialized plain `private` copies. Seed `firstprivate` as initialized, so it
+   requires no write-before-read assertion.
 
 The disjointness precondition is shared, but the oracle needs no separate
 disjointness *assertion*: under the 1:1 schedule every pair of iterations runs
 concurrently, so any write/write or read/write overlap is a genuine data race that
 a detector reports. That report is the disjointness check. (Read/read overlap is
-not a race and is correctly not reported.) The write-before-read and
+not a race and is correctly not reported.) The uninitialized-private-read and
 fixed-trip-count checks are needed only by the oracle: without the former the 1:1
-schedule *hides* per-thread-state races (a private read before written, e.g. a
+schedule can otherwise *hide* schedule-dependent per-thread state (e.g. a
 per-thread counter); without the latter the "one iteration per thread" mapping is
-not well-defined.
+not well-defined. The check is required only for variables whose private copy is
+not initialized on entry. `firstprivate` copies start initialized, so reads before
+an iteration-local write are allowed for them.
 
 ## Recording footprints
 
@@ -106,19 +141,26 @@ the 1:1 thread count must be realisable.
   functions. This is about the *absence* of constructs, so it is a syntactic scan
   of the body (or a linter/compile-time rule), not a runtime assertion.
 
-- **Write-before-read for privates** (oracle only). A private variable is safe
-  only if written before read in each iteration. Check with a per-iteration
-  "initialized" flag:
+- **Uninitialized reads of uninitialized privates** (oracle only). A `private`
+  variable is safe only if each read observes either the entry initialization or
+  an earlier write in the same iteration. Plain `private` has no entry
+  initialization, so this degenerates to write-before-read. Check with a
+  per-iteration "initialized" flag seeded from the privatization kind:
 
   ```c
-  int p_init = 0;
+  int p_init = IS_FIRSTPRIVATE(p);
   #define P_WRITE(p)  do { (p); p_init = 1; } while (0)
   #define P_READ(p)   ( assert(p_init), (p) )   // read-before-write -> fires
   ```
 
-  A firing `P_READ` means the private is read before written (the per-thread
-  counter hazard). `firstprivate` is exempt — it is initialised deterministically
-  from the shared original, so treat it as pre-initialised.
+  A firing `P_READ` means a non-initialized private copy is read before being
+  written in that iteration. `firstprivate` is initialized deterministically from
+  the original value before the loop body, so its flag starts true and no separate
+  write-before-read assertion is needed for it. In Coq this is captured by
+  `PrivateOracle.v`: `all_private_oracle_is_write_before_read` shows that for
+  plain `private` the oracle check is exactly write-before-read, while
+  `firstprivate_needs_no_write_before_read_check` shows initialized
+  `firstprivate` needs no such check.
 
 - **Fixed trip count** (oracle only). The iteration count must not depend on the
   schedule; ensure the loop bound is evaluated once before the region
